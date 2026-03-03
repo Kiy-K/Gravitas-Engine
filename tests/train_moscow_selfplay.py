@@ -292,20 +292,20 @@ def make_vec_env(
 
     def _make(i: int):
         def _thunk():
-            opp = None
+            opp_policy = None
             if _opp_path is not None:
                 from sb3_contrib import RecurrentPPO as _RPPO
-                opp = _RPPO.load(_opp_path, device="cpu")
+                opp_model = _RPPO.load(_opp_path, device="cpu")
                 # Wrap model.predict as a callable policy
                 def _opp_fn(obs):
                     import numpy as _np
-                    act, _ = opp.predict(obs.reshape(1, -1), deterministic=False)
+                    act, _ = opp_model.predict(obs.reshape(1, -1), deterministic=False)
                     return act.flatten()
-                opp = _opp_fn
+                opp_policy = _opp_fn
             env = make_moscow_env(
                 scenario_cfg, faction_id=faction_id,
                 opponent_faction_id=opponent_faction_id,
-                opponent_policy=opp, max_steps=max_steps,
+                opponent_policy=opp_policy, max_steps=max_steps,
                 seed=seed + i * 1000,
             )
             return Monitor(env)
