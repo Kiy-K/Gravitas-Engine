@@ -24,6 +24,7 @@ opencv-python>=4.7.0  # For rendering environments (if visual)
 cloudpickle>=2.2.0  # For saving/loading models
 
 # Build & optimization
+cython>=3.0.0
 nuitka>=4.0.0
 ordered-set>=4.1.0
 

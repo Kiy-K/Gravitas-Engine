@@ -37,6 +37,8 @@ regime_engine.zip
 build/
 *.build/
 *.so
+# Allow Cython compiled kernels in-place
+!gravitas_engine/core/_kernels*.so
 
 # Large files (LFS)
 # logs/ppo_survival/*.zip is tracked by LFS

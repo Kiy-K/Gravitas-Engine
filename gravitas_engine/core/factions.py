@@ -28,6 +28,13 @@ from numpy.typing import NDArray
 from .parameters import SystemParameters
 from .state import FactionState, RegimeState, SystemState
 
+# ── Cython fast-path imports ──────────────────────────────────────────────── #
+try:
+    from ._kernels import compute_gini_c as _compute_gini_c
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+
 
 # --------------------------------------------------------------------------- #
 # Helper                                                                       #
@@ -60,6 +67,8 @@ def compute_gini(powers: NDArray[np.float64]) -> float:
     Returns:
         Gini ∈ [0, 1 − 1/N]  (analytically bounded below 1 for N ≥ 2).
     """
+    if _USE_CYTHON:
+        return _compute_gini_c(np.ascontiguousarray(powers, dtype=np.float64))
     n = len(powers)
     if n < 2:
         return 0.0

@@ -53,6 +53,7 @@ except ImportError:
     HAS_RPPO = False
 
 try:
+    from stable_baselines3 import PPO
     from stable_baselines3.common.monitor import Monitor
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
     from stable_baselines3.common.callbacks import BaseCallback
@@ -276,6 +277,7 @@ def make_vec_env(
     n_envs: int = 4,
     max_steps: int = 200,
     seed: int = 42,
+    opp_deterministic: bool = True,
 ) -> VecNormalize:
     """Create vectorized + normalized env for SB3 training.
 
@@ -294,14 +296,43 @@ def make_vec_env(
         def _thunk():
             opp_policy = None
             if _opp_path is not None:
+                import torch as _torch
                 from sb3_contrib import RecurrentPPO as _RPPO
                 opp_model = _RPPO.load(_opp_path, device="cpu")
-                # Wrap model.predict as a callable policy
+                opp_model.policy.set_training_mode(False)
+                # Cache action for ACT_REPEAT steps (realistic + fast)
+                _ACT_REPEAT = 4
+                _state = {
+                    "lstm": None,
+                    "episode_start": np.array([True]),
+                    "cached_act": None,
+                    "calls_left": 0,
+                }
+
                 def _opp_fn(obs):
-                    import numpy as _np
-                    act, _ = opp_model.predict(obs.reshape(1, -1), deterministic=False)
-                    return act.flatten()
+                    if _state["calls_left"] > 0 and _state["cached_act"] is not None:
+                        _state["calls_left"] -= 1
+                        return _state["cached_act"]
+                    with _torch.no_grad():
+                        act, _state["lstm"] = opp_model.predict(
+                            obs.reshape(1, -1),
+                            state=_state["lstm"],
+                            episode_start=_state["episode_start"],
+                            deterministic=opp_deterministic,
+                        )
+                    _state["episode_start"] = np.array([False])
+                    _state["cached_act"] = act.flatten()
+                    _state["calls_left"] = _ACT_REPEAT - 1
+                    return _state["cached_act"]
+
+                def _opp_reset():
+                    _state["lstm"] = None
+                    _state["episode_start"] = np.array([True])
+                    _state["cached_act"] = None
+                    _state["calls_left"] = 0
+
                 opp_policy = _opp_fn
+                opp_policy._reset_states = _opp_reset  # type: ignore
             env = make_moscow_env(
                 scenario_cfg, faction_id=faction_id,
                 opponent_faction_id=opponent_faction_id,
@@ -426,9 +457,9 @@ def train_selfplay(args: argparse.Namespace) -> None:
     policy_kwargs = dict(
         lstm_hidden_size=args.lstm_hidden,
         n_lstm_layers=1,
-        shared_lstm=False,
-        enable_critic_lstm=True,
-        net_arch=dict(pi=[256, 128], vf=[256, 128]),
+        shared_lstm=True,
+        enable_critic_lstm=False,
+        net_arch=dict(pi=[128, 64], vf=[128, 64]),
     )
 
     _resume_from = args.resume_from
@@ -466,6 +497,10 @@ def train_selfplay(args: argparse.Namespace) -> None:
                       f"(vs {'model' if opponent_model else 'random'})")
                 t0 = time.time()
 
+                # Phases 1-3: deterministic opponent (fast)
+                # Phases 4-6: stochastic opponent (better generalization)
+                _opp_det = phase_num <= 3
+
                 env = make_vec_env(
                     scenario_cfg,
                     faction_id=side,
@@ -474,6 +509,7 @@ def train_selfplay(args: argparse.Namespace) -> None:
                     n_envs=args.n_envs,
                     max_steps=phase_max_steps,
                     seed=args.seed + global_round * 100 + side * 50,
+                    opp_deterministic=_opp_det,
                 )
 
                 if current_model is None:
@@ -484,7 +520,7 @@ def train_selfplay(args: argparse.Namespace) -> None:
                         if ckpt.exists():
                             current_model = RecurrentPPO.load(
                                 str(ckpt), env=env, device=args.device,
-                                verbose=0, learning_rate=phase_lr,
+                                verbose=1, learning_rate=phase_lr,
                                 ent_coef=phase_ent,
                             )
                             print(f"    Resumed from {ckpt}")
@@ -495,7 +531,7 @@ def train_selfplay(args: argparse.Namespace) -> None:
                                 env.observation_space, spaces.Dict
                             ) else "MlpLstmPolicy",
                             env,
-                            verbose=0,
+                            verbose=1,
                             learning_rate=phase_lr,
                             n_steps=args.n_steps,
                             batch_size=args.batch_size,
@@ -517,6 +553,7 @@ def train_selfplay(args: argparse.Namespace) -> None:
                     total_timesteps=phase["steps"],
                     reset_num_timesteps=False,
                     progress_bar=True,
+                    log_interval=1,
                 )
                 elapsed = time.time() - t0
                 print(f"  Done {side_name} ({elapsed:.1f}s)")
@@ -677,13 +714,13 @@ def parse_args() -> argparse.Namespace:
                    help="Training steps per side per round")
     p.add_argument("--n-envs", type=int, default=8,
                    help="Parallel envs for training")
-    p.add_argument("--n-steps", type=int, default=512,
+    p.add_argument("--n-steps", type=int, default=1024,
                    help="Rollout steps per env per update")
-    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--n-epochs", type=int, default=4)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--gamma", type=float, default=0.99)
-    p.add_argument("--lstm-hidden", type=int, default=128)
+    p.add_argument("--lstm-hidden", type=int, default=64)
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--eval-every", type=int, default=1,

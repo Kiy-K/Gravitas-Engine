@@ -34,6 +34,13 @@ from .dynamics_extensions import compute_economic_derivatives, compute_topologic
 from .parameters import SystemParameters
 from .state import RegimeState
 
+# ── Cython fast-path imports ──────────────────────────────────────────────── #
+try:
+    from ._kernels import compute_faction_derivs_c as _compute_faction_derivs_c
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+
 
 # --------------------------------------------------------------------------- #
 # Faction derivative computation                                                #
@@ -69,6 +76,22 @@ def compute_faction_derivatives(
     inst = state.system.instability
     rep = state.system.repression
     elite = state.system.elite_alignment
+
+    if _USE_CYTHON:
+        aff_mat = None
+        if state.affinity_matrix:
+            aff_mat = np.array(state.affinity_matrix, dtype=np.float64)
+            np.fill_diagonal(aff_mat, 0.0)
+        return _compute_faction_derivs_c(
+            np.ascontiguousarray(powers), np.ascontiguousarray(rads),
+            np.ascontiguousarray(cohs), np.ascontiguousarray(mems),
+            exh, frag, inst, rep, elite,
+            params.alpha_power, params.beta_power, params.gamma_power,
+            params.alpha_rad, params.beta_rad, params.gamma_rad,
+            params.alpha_coh, params.beta_coh,
+            params.alpha_mem, params.beta_mem,
+            aff_mat,
+        )
 
     activity = 1.0 - exh  # All ODEs except Mem are gated by (1-Exh)
 

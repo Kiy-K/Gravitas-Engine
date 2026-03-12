@@ -22,6 +22,19 @@ from .gravitas_params import GravitasParams
 from .gravitas_state import ClusterState, GlobalState, GravitasWorld, N_CLUSTER_VARS
 from ..systems.diplomacy import alliance_cluster_derivatives
 
+# ── Cython fast-path imports ──────────────────────────────────────────────── #
+try:
+    from ._kernels import (
+        compute_hazard_c as _compute_hazard_c,
+        cluster_derivatives_c as _cluster_derivatives_c,
+        global_derivatives_c as _global_derivatives_c,
+        rk4_substep_c as _rk4_substep_c,
+        alliance_cluster_derivatives_c as _alliance_cluster_derivatives_c,
+    )
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+
 
 # ─────────────────────────────────────────────────────────────────────────── #
 # Hazard index (algebraic — re-derived each step, not integrated)             #
@@ -42,6 +55,13 @@ def compute_hazard(
 
     We approximate the cascade term in one forward pass (sufficient for dt=0.01).
     """
+    if _USE_CYTHON:
+        return _compute_hazard_c(
+            np.ascontiguousarray(sigma), np.ascontiguousarray(trust),
+            np.ascontiguousarray(polar), np.ascontiguousarray(conflict),
+            sys_pol, params.gamma_h1, params.gamma_h2, params.gamma_h3,
+            params.kappa_h, params.kappa_p,
+        )
     # Local hazard (no cascade yet)
     h_local = (
         params.gamma_h1 * np.power(np.clip(1.0 - sigma, 0.0, 1.0), params.kappa_h)
@@ -71,6 +91,26 @@ def cluster_derivatives(
 
     Index mapping: 0=σ, 1=h(unused/overwritten), 2=r, 3=m, 4=τ, 5=p
     """
+    if _USE_CYTHON and (world is None or not hasattr(world, '_cached')):
+        deriv = _cluster_derivatives_c(
+            np.ascontiguousarray(arr), np.ascontiguousarray(hazard),
+            np.ascontiguousarray(adjacency),
+            g.exhaustion, g.polarization, g.fragmentation,
+            params.alpha_sigma, params.beta_sigma, params.nu_sigma,
+            params.alpha_res, params.hazard_res_cost,
+            params.military_decay,
+            params.military_tau_cost, params.deprivation_tau_cost, params.tau_decay,
+            params.alpha_pol, params.beta_pol,
+        )
+        if alliance is not None:
+            N = arr.shape[0]
+            ally = np.ascontiguousarray(alliance[:N, :N])
+            deriv += _alliance_cluster_derivatives_c(
+                np.ascontiguousarray(arr), ally,
+                params.nu_alliance, params.nu_res_alliance, params.alpha_hostility,
+            )
+        return deriv
+
     N = arr.shape[0]
     sigma    = arr[:, 0]
     resource = arr[:, 2]
@@ -158,6 +198,18 @@ def global_derivatives(
 
     Accepts raw array [E, Φ, Π, Ψ, M, T] — no GlobalState construction needed.
     """
+    if _USE_CYTHON:
+        return _global_derivatives_c(
+            np.ascontiguousarray(g_arr), np.ascontiguousarray(hazard),
+            np.ascontiguousarray(military), np.ascontiguousarray(trust),
+            military_load, propaganda_load,
+            params.alpha_exh, params.beta_exh, params.military_exh_coeff,
+            params.alpha_phi, params.beta_phi, params.military_phi_coeff,
+            params.alpha_pol, params.beta_pol, params.propaganda_pol_coeff,
+            params.psi_recovery, params.psi_propaganda_cost,
+            params.alpha_tau, params.tau_decay, params.military_tau_cost,
+        )
+
     E   = float(g_arr[0])
     Phi = float(g_arr[1])
     Pi  = float(g_arr[2])
@@ -270,7 +322,6 @@ def rk4_step(
     SDE noise is applied to σ and r after the deterministic RK4.
     """
     dt     = params.dt
-    half   = dt * 0.5
     step   = world.global_state.step
 
     c0     = world.cluster_array()
@@ -279,6 +330,38 @@ def rk4_step(
     C      = world.conflict
     AL     = world.alliance
     N      = c0.shape[0]
+
+    # ─── Cython fast-path: entire RK4 in C (no alliance support yet) ───── #
+    if _USE_CYTHON and AL is None:
+        c_new, g_new_a = _rk4_substep_c(
+            np.ascontiguousarray(c0), np.ascontiguousarray(g0),
+            np.ascontiguousarray(A), np.ascontiguousarray(C),
+            military_load, propaganda_load, dt, sigma_noise, rng,
+            # hazard params
+            params.gamma_h1, params.gamma_h2, params.gamma_h3,
+            params.kappa_h, params.kappa_p,
+            # cluster params
+            params.alpha_sigma, params.beta_sigma, params.nu_sigma,
+            params.alpha_res, params.hazard_res_cost,
+            params.military_decay,
+            params.military_tau_cost, params.deprivation_tau_cost, params.tau_decay,
+            params.alpha_pol, params.beta_pol,
+            # global params
+            params.alpha_exh, params.beta_exh, params.military_exh_coeff,
+            params.alpha_phi, params.beta_phi, params.military_phi_coeff,
+            params.alpha_pol, params.beta_pol,
+            params.propaganda_pol_coeff,
+            params.psi_recovery, params.psi_propaganda_cost,
+            params.alpha_tau, params.tau_decay, params.military_tau_cost,
+        )
+        new_clusters = [
+            ClusterState._from_array_fast(c_new[i]) for i in range(N)
+        ]
+        new_global = GlobalState.from_array(g_new_a, step=step)
+        return world.copy_with_clusters(new_clusters).copy_with_global(new_global)
+
+    # ─── Python fallback (with alliance support) ───────────────────────── #
+    half   = dt * 0.5
 
     # All intermediate global states are raw arrays — no GlobalState construction.
     # Only `polarization` (index 2) is needed for hazard computation.

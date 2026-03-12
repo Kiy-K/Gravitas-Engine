@@ -25,6 +25,13 @@ import numpy as np
 from .parameters import SystemParameters
 from .state import RegimeState
 
+# ── Cython fast-path imports ──────────────────────────────────────────────── #
+try:
+    from ._kernels import compute_exhaustion_deriv_c as _compute_exhaustion_deriv_c
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+
 
 def compute_exhaustion_derivative(
     state: RegimeState,
@@ -49,12 +56,20 @@ def compute_exhaustion_derivative(
     vol = state.system.volatility
     inst = state.system.instability
 
+    # Phase 3: district stress contributes to exhaustion accumulation
+    has_hierarchy = (getattr(state, "hierarchical", None) is not None
+                     and getattr(params, "use_hierarchy", False))
+
+    if _USE_CYTHON and not has_hierarchy:
+        return _compute_exhaustion_deriv_c(
+            exh, vol, inst, params.alpha_exh, params.beta_exh,
+        )
+
     accumulation = vol * inst * (1.0 - exh)
     recovery = params.beta_exh * (1.0 - vol) * (1.0 - inst) * exh
 
     raw = params.alpha_exh * (accumulation - recovery)
-    # Phase 3: district stress contributes to exhaustion accumulation
-    if getattr(state, "hierarchical", None) is not None and getattr(params, "use_hierarchy", False):
+    if has_hierarchy:
         from .hierarchical_coupling import exhaustion_increment_from_districts
         raw += exhaustion_increment_from_districts(state.hierarchical, params)
     return float(np.clip(raw, -exh, 1.0 - exh))

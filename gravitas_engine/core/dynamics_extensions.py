@@ -13,6 +13,16 @@ from numpy.typing import NDArray
 from .parameters import SystemParameters
 from .state import RegimeState
 
+# ── Cython fast-path imports ──────────────────────────────────────────────── #
+try:
+    from ._kernels import (
+        compute_economic_derivs_c as _compute_economic_derivs_c,
+        compute_topological_derivs_c as _compute_topological_derivs_c,
+    )
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+
 
 def compute_economic_derivatives(
     state: RegimeState, params: SystemParameters
@@ -27,6 +37,15 @@ def compute_economic_derivatives(
     inst = state.system.instability
     vol = state.system.volatility
     exh = state.system.exhaustion
+
+    if _USE_CYTHON:
+        powers = state.get_faction_powers()
+        wealths = state.get_faction_wealths()
+        return _compute_economic_derivs_c(
+            np.ascontiguousarray(powers), np.ascontiguousarray(wealths),
+            gdp, inst, vol, exh,
+            params.alpha_gdp, params.beta_gdp, params.wealth_extraction,
+        )
 
     # GDP grows when stable, shrinks when unstable/volatile
     # Bounded by exhaustion.
@@ -65,6 +84,20 @@ def compute_topological_derivatives(
         
     leg = state.system.legitimacy
     inst = state.system.instability
+    n = state.n_factions
+    rads = state.get_faction_radicalizations()
+
+    if _USE_CYTHON:
+        aff_mat = None
+        if state.affinity_matrix:
+            aff_mat = np.array(state.affinity_matrix, dtype=np.float64)
+        d_pillars, d_aff_arr = _compute_topological_derivs_c(
+            np.ascontiguousarray(rads, dtype=np.float64),
+            np.ascontiguousarray(pillars),
+            leg, inst, n, aff_mat,
+        )
+        aff_tuple = tuple(tuple(float(d_aff_arr[i, j]) for j in range(n)) for i in range(n))
+        return d_pillars, aff_tuple
     
     # Pillars revert to Legitimacy at a slow rate, eroded heavily by Instability.
     d_pillars = 0.1 * (leg - pillars) - 0.2 * inst * pillars
@@ -72,9 +105,6 @@ def compute_topological_derivatives(
     # Affinity Matrix drift:
     # Factions with similar radicalization gain affinity; 
     # Factions with dissimilar radicalization lose affinity.
-    n = state.n_factions
-    rads = state.get_faction_radicalizations()
-    
     if not state.affinity_matrix:
         current_aff = np.eye(n)
     else:

@@ -24,6 +24,13 @@ from numpy.typing import NDArray
 from .parameters import SystemParameters
 from .state import RegimeState
 
+# ── Cython fast-path imports ──────────────────────────────────────────────── #
+try:
+    from ._kernels import compute_gini_c as _compute_gini_c
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
+
 
 def compute_gini(powers: NDArray[np.float64]) -> float:
     """Compute Gini coefficient of power shares.
@@ -37,6 +44,8 @@ def compute_gini(powers: NDArray[np.float64]) -> float:
     Returns:
         Gini coefficient ∈ [0, (N−1)/N].
     """
+    if _USE_CYTHON:
+        return _compute_gini_c(np.ascontiguousarray(powers, dtype=np.float64))
     n = len(powers)
     if n < 2:
         return 0.0

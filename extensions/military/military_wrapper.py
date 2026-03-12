@@ -169,6 +169,10 @@ class MilitaryWrapper(gym.Env):
 
         self._step_count = 0
 
+        # Reset opponent LSTM hidden states on episode boundary
+        if self.opponent_policy is not None and hasattr(self.opponent_policy, '_reset_states'):
+            self.opponent_policy._reset_states()
+
         obs = world_to_obs_array(self.world, self.faction_id, self.max_clusters)
         info = {"step": 0, "victory": check_victory(self.world)}
         return obs, info

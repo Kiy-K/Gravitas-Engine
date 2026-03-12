@@ -32,6 +32,19 @@ from numpy.typing import NDArray
 
 
 # ─────────────────────────────────────────────────────────────────────────── #
+# Fast scalar clamp — avoids numpy.clip overhead on single floats             #
+# ─────────────────────────────────────────────────────────────────────────── #
+
+def _sc(v: float, lo: float, hi: float) -> float:
+    """Scalar clamp: max(lo, min(v, hi)). 50-100x faster than np.clip on scalars."""
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+
+# ─────────────────────────────────────────────────────────────────────────── #
 # Enums                                                                       #
 # ─────────────────────────────────────────────────────────────────────────── #
 
@@ -336,7 +349,7 @@ def compute_elevation_advantage(attacker_elevation: float, defender_elevation: f
     Returns multiplier in [0.85, 1.15].
     """
     delta = attacker_elevation - defender_elevation
-    advantage = 1.0 + np.clip(delta / 2000.0, -0.15, 0.15)
+    advantage = 1.0 + _sc(delta / 2000.0, -0.15, 0.15)
     return float(advantage)
 
 
@@ -462,7 +475,7 @@ class WeatherState:
         if self.condition in (WeatherCondition.BLIZZARD, WeatherCondition.THUNDERSTORM,
                               WeatherCondition.ICE_STORM, WeatherCondition.DUST_STORM):
             rate *= 2.0
-        return float(np.clip(rate, 0.0, 0.015))
+        return _sc(rate, 0.0, 0.015)
 
     def equipment_reliability(self, winterized: bool = False) -> float:
         """
@@ -484,7 +497,7 @@ class WeatherState:
         # Sand/dust clogs machinery
         if self.condition in (WeatherCondition.DUST_STORM,):
             rel -= 0.15
-        return float(np.clip(rel, 0.15, 1.0))
+        return _sc(rel, 0.15, 1.0)
 
     @property
     def movement_penalty(self) -> float:
@@ -499,7 +512,7 @@ class WeatherState:
             penalty += 0.15
         elif self.time_of_day in (TimeOfDay.DAWN, TimeOfDay.DUSK):
             penalty += 0.05
-        return float(np.clip(penalty, 0.0, 0.95))
+        return _sc(penalty, 0.0, 0.95)
 
     @property
     def air_support_factor(self) -> float:
@@ -507,7 +520,7 @@ class WeatherState:
         base = WEATHER_AIR_SUPPORT_FACTOR.get(self.condition, 0.5)
         if self.time_of_day == TimeOfDay.NIGHT:
             base *= 0.3
-        return float(np.clip(base, 0.0, 1.0))
+        return _sc(base, 0.0, 1.0)
 
     @property
     def visibility_factor(self) -> float:
@@ -517,7 +530,7 @@ class WeatherState:
             base *= 0.25
         elif self.time_of_day in (TimeOfDay.DAWN, TimeOfDay.DUSK):
             base *= 0.6
-        return float(np.clip(base, 0.05, 1.0))
+        return _sc(base, 0.05, 1.0)
 
 
 def interpolate_temperature(
@@ -527,7 +540,7 @@ def interpolate_temperature(
     """Interpolate temperature from a step→°C curve (config-driven)."""
     curve = temp_curve or DEFAULT_TEMP_CURVE_C
     keys = sorted(curve.keys())
-    t = np.clip(step, keys[0], keys[-1])
+    t = _sc(step, keys[0], keys[-1])
     for i in range(len(keys) - 1):
         if keys[i] <= t <= keys[i + 1]:
             frac = (t - keys[i]) / (keys[i + 1] - keys[i])
@@ -640,7 +653,7 @@ def step_weather(
         humidity = max(5, humidity - 30)
     elif climate_type == "tropical":
         humidity = min(100, humidity + 20)
-    humidity = float(np.clip(humidity, 0, 100))
+    humidity = _sc(humidity, 0, 100)
 
     # Wind
     wind = max(0, base_wind_ms + rng.normal(0, 2))
@@ -681,13 +694,13 @@ def step_weather(
     return WeatherState(
         temperature_c=float(temp),
         condition=condition,
-        snow_depth_cm=float(np.clip(snow, 0, 200)),
-        wind_speed_ms=float(np.clip(wind, 0, 40)),
-        visibility_km=float(np.clip(vis, 0.2, 20)),
+        snow_depth_cm=_sc(snow, 0, 200),
+        wind_speed_ms=_sc(wind, 0, 40),
+        visibility_km=_sc(vis, 0.2, 20),
         ground_frozen=temp < -5,
-        mud_factor=float(np.clip(mud, 0, 1)),
+        mud_factor=_sc(mud, 0, 1),
         humidity_pct=humidity,
-        sand_depth_cm=float(np.clip(sand, 0, 100)),
+        sand_depth_cm=_sc(sand, 0, 100),
         heat_index_c=float(heat_idx),
         time_of_day=tod,
         season=season,
@@ -724,7 +737,7 @@ class SupplyState:
     @property
     def supply_ratio(self) -> float:
         """Overall supply health [0, 1]."""
-        return float(np.clip(self.total_supply / max(self.depot_max_tons, 1), 0.0, 1.0))
+        return _sc(self.total_supply / max(self.depot_max_tons, 1), 0.0, 1.0)
 
     @property
     def is_critical(self) -> bool:
@@ -734,11 +747,11 @@ class SupplyState:
 
     @property
     def fuel_ratio(self) -> float:
-        return float(np.clip(self.fuel_tons / 100.0, 0, 1))
+        return _sc(self.fuel_tons / 100.0, 0.0, 1.0)
 
     @property
     def ammo_ratio(self) -> float:
-        return float(np.clip(self.ammo_tons / 100.0, 0, 1))
+        return _sc(self.ammo_tons / 100.0, 0.0, 1.0)
 
     def copy_with(self, **kwargs) -> 'SupplyState':
         d = {f.name: getattr(self, f.name) for f in self.__dataclass_fields__.values()}
@@ -1285,14 +1298,14 @@ def compute_penetration_factor(
     if armor <= 0:
         pen_ratio = 1.0
     else:
-        pen_ratio = float(np.clip(pen / armor, 0.1, 1.5))
+        pen_ratio = _sc(pen / armor, 0.1, 1.5)
 
     # 2. Damage-type effectiveness
     dmg_eff = get_damage_multiplier(a_profile.primary_damage, d_profile.armor_class)
 
     # Geometric mean of both factors
-    combined = np.sqrt(pen_ratio * dmg_eff)
-    return float(np.clip(combined, 0.05, 2.0))
+    combined = (pen_ratio * dmg_eff) ** 0.5
+    return _sc(combined, 0.05, 2.0)
 
 
 def compute_combat_effectiveness(
@@ -1345,7 +1358,7 @@ def compute_combat_effectiveness(
     elif weather.time_of_day in (TimeOfDay.DAWN, TimeOfDay.DUSK):
         eff *= 0.9
 
-    return float(np.clip(eff, 0.1, 1.5))
+    return _sc(eff, 0.1, 1.5)
 
 
 def compute_artillery_effectiveness(
@@ -1382,7 +1395,7 @@ def compute_artillery_effectiveness(
     }
     eff *= arty_terrain_mod.get(terrain.terrain_type, 1.0)
 
-    return float(np.clip(eff, 0.0, 1.5))
+    return _sc(eff, 0.0, 1.5)
 
 
 def compute_air_support_effectiveness(
@@ -1400,7 +1413,7 @@ def compute_air_support_effectiveness(
     if has_air_superiority:
         eff *= 1.3
 
-    return float(np.clip(eff, 0.0, 1.0))
+    return _sc(eff, 0.0, 1.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────── #
@@ -1492,7 +1505,7 @@ def compute_movement_speed(
     # No fuel = immobilized vehicles
     if is_vehicle and supply.fuel_tons < 5:
         base *= 0.1
-    return float(np.clip(base, 0.0, 2.0))
+    return _sc(base, 0.0, 2.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────── #

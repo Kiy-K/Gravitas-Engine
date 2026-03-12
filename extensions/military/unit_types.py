@@ -27,6 +27,37 @@ class DamageType(Enum):
     AA_DAMAGE = auto()      # Anti-air damage
     ARTILLERY_DAMAGE = auto()  # Explosive/area damage
     NAVAL_DAMAGE = auto()    # Anti-ship damage (for future expansion)
+    # Expanded damage types used by physics engine
+    SMALL_ARMS = auto()       # Rifles, MGs — anti-personnel
+    AP_KINETIC = auto()       # Solid-shot AP rounds
+    AP_COMPOSITE = auto()     # APCR / APDS rounds
+    HEAT = auto()             # Shaped-charge warheads
+    HE = auto()               # High-explosive shells
+    HE_FRAG = auto()          # HE-Fragmentation (anti-personnel optimised)
+    INCENDIARY = auto()       # Fire / thermite / napalm
+    ROCKET_HE = auto()        # Rocket-launched HE (Katyusha, Nebelwerfer)
+    NAVAL_SHELL = auto()      # Large-calibre naval guns
+    BOMB_GP = auto()          # General-purpose aerial bombs
+    BOMB_AP = auto()          # Armour-piercing aerial bombs
+    MINE_AT = auto()          # Anti-tank mines
+    MINE_AP = auto()          # Anti-personnel mines
+    DEMOLITION = auto()       # Satchel charges / engineer demo
+    AA_AUTOCANNON = auto()    # Rapid-fire AA cannon (20–40 mm)
+
+
+# ─────────────────────────────────────────────────────────────────────────── #
+# Armor Classes                                                                 #
+# ─────────────────────────────────────────────────────────────────────────── #
+
+class ArmorClass(Enum):
+    """Protection classes for the damage-effectiveness matrix."""
+    UNARMORED = auto()      # Infantry, trucks, towed guns
+    LIGHT_ARMOR = auto()    # Armored cars, halftracks, recon vehicles
+    MEDIUM_ARMOR = auto()   # Medium tanks, SPGs
+    HEAVY_ARMOR = auto()    # Heavy tanks, assault guns
+    FORTIFIED = auto()      # Bunkers, fortifications
+    NAVAL_ARMOR = auto()    # Ships (future)
+
 
 # ─────────────────────────────────────────────────────────────────────────── #
 # Expanded Unit Types                                                           #
