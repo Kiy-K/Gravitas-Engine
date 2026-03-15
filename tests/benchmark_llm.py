@@ -270,61 +270,72 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
         print(f"  TURN {turn + 1}/{args.turns}")
         print(f"{'─' * 60}")
 
-        # ── Oceania's turn ────────────────────────────────────────────── #
+        # ── Prepare summaries (instant — no API calls) ──────────────── #
         summary_0 = summarize_turn(game, faction_id=0)
+        summary_1 = summarize_turn(game, faction_id=1)
+        winston_active = (game.resistance and game.resistance.winston.is_alive
+                          and not game.resistance.winston.is_captured)
+        blf_summary = summarize_blf_turn(game) if winston_active else ""
+
         if args.verbose:
             print(f"\n[Oceania Briefing]\n{summary_0[:500]}...")
+            print(f"\n[Eurasia Briefing]\n{summary_1[:500]}...")
+            if winston_active:
+                print(f"\n[The Ghost's Briefing]\n{blf_summary[:400]}...")
 
-        t0 = time.time()
-        response_0 = oceania_llm.chat(OCEANIA_SYSTEM_PROMPT, summary_0)
-        t_api_0 = time.time() - t0
+        # ── PARALLEL LLM calls (3x speedup) ─────────────────────────── #
+        # All 3 factions read the SAME game state snapshot. Their API
+        # calls are independent — fire concurrently, apply sequentially.
+        from concurrent.futures import ThreadPoolExecutor
 
+        t_parallel_start = time.time()
+
+        def _call_oceania():
+            return oceania_llm.chat(OCEANIA_SYSTEM_PROMPT, summary_0)
+
+        def _call_eurasia():
+            return eurasia_llm.chat(EURASIA_SYSTEM_PROMPT, summary_1)
+
+        def _call_winston():
+            if winston_active:
+                return winston_llm.chat(WINSTON_SYSTEM_PROMPT, blf_summary)
+            return ""
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            fut_o = pool.submit(_call_oceania)
+            fut_e = pool.submit(_call_eurasia)
+            fut_w = pool.submit(_call_winston)
+            response_0 = fut_o.result()
+            response_1 = fut_e.result()
+            winston_response = fut_w.result()
+
+        t_parallel = time.time() - t_parallel_start
+
+        # ── Apply actions sequentially (order matters for game state) ── #
         actions_0 = parse_action(response_0, game, faction_id=0)
         results_0 = apply_actions(game, faction_id=0, actions=actions_0, rng=rng)
         oceania_llm.actions_parsed += len(actions_0)
         oceania_llm.actions_noop += sum(1 for a in actions_0 if a.get('type') == 'noop')
-
-        print(f"  ⚙ Big Brother's Military Council ({t_api_0:.1f}s):")
-        for r in results_0:
-            print(f"    → {r}")
-
-        # ── Eurasia's turn ────────────────────────────────────────────── #
-        summary_1 = summarize_turn(game, faction_id=1)
-        if args.verbose:
-            print(f"\n[Supreme Marshal Kalinin's Briefing]\n{summary_1[:500]}...")
-
-        t0 = time.time()
-        response_1 = eurasia_llm.chat(EURASIA_SYSTEM_PROMPT, summary_1)
-        t_api_1 = time.time() - t0
 
         actions_1 = parse_action(response_1, game, faction_id=1)
         results_1 = apply_actions(game, faction_id=1, actions=actions_1, rng=rng)
         eurasia_llm.actions_parsed += len(actions_1)
         eurasia_llm.actions_noop += sum(1 for a in actions_1 if a.get('type') == 'noop')
 
-        print(f"  ☭ Supreme Marshal Kalinin ({t_api_1:.1f}s):")
-        for r in results_1:
-            print(f"    → {r}")
-
-        # ── Winston Smith / BLF turn ─────────────────────────────────── #
-        winston_response = ""
         winston_results = []
-        if game.resistance and game.resistance.winston.is_alive and not game.resistance.winston.is_captured:
-            blf_summary = summarize_blf_turn(game)
-            if args.verbose:
-                print(f"\n[The Ghost's Briefing]\n{blf_summary[:400]}...")
-
-            t0 = time.time()
-            winston_response = winston_llm.chat(WINSTON_SYSTEM_PROMPT, blf_summary)
-            t_api_w = time.time() - t0
-
+        if winston_active and winston_response:
             blf_actions = parse_blf_action(winston_response, game)
             winston_results = apply_blf_actions(game, blf_actions, rng)
             winston_llm.actions_parsed += len(blf_actions)
 
-            print(f"\n  👻 The Ghost of London ({t_api_w:.1f}s):")
-            for r in winston_results:
-                print(f"    → {r}")
+        # ── Print results ─────────────────────────────────────────────── #
+        print(f"  ⚙ Oceania + ☭ Eurasia + 👻 Winston (parallel {t_parallel:.1f}s):")
+        for r in results_0:
+            print(f"    [O] {r}")
+        for r in results_1:
+            print(f"    [E] {r}")
+        for r in winston_results:
+            print(f"    [W] {r}")
 
         # ── Step the game ─────────────────────────────────────────────── #
         feedback = step_game(game, rng)
@@ -343,7 +354,6 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
             # Trim to last complete sentence (don't truncate mid-word)
             raw = dispatch.strip()
             if len(raw) > 800:
-                # Find the last sentence-ending punctuation before 800 chars
                 for end_char in ['. ', '." ', '.\n', '."', '.\'']:
                     idx = raw[:800].rfind(end_char)
                     if idx > 200:
@@ -372,10 +382,6 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
             "commentary": commentary_text,
             "visible_events": visible_text,
         })
-
-        # Rate limit: 4 API calls/turn × 3 players + commentary = need spacing
-        if not args.dry_run:
-            time.sleep(2.0)  # rate limit buffer for 4 calls/turn
 
     # ── Final Results ─────────────────────────────────────────────────── #
     elapsed = time.time() - t_start
