@@ -705,6 +705,18 @@ def economy_summary(world: EconomyWorld, faction_id: int, cluster_owners: Dict[i
     else:
         lines.append("Supply lines adequate. No critical shortages.")
 
+    # Factories under construction (so LLMs don't re-order)
+    building = []
+    for ce in world.clusters:
+        if cluster_owners.get(ce.cluster_id) != faction_id:
+            continue
+        name = cluster_names[ce.cluster_id] if ce.cluster_id < len(cluster_names) else f"C{ce.cluster_id}"
+        for f in ce.factories:
+            if f.is_building:
+                building.append(f"{f.factory_type.name} in {name}")
+    if building:
+        lines.append(f"UNDER CONSTRUCTION (DO NOT re-order): {', '.join(building[:4])}")
+
     # Top producers
     mil_prod = []
     for ce in world.clusters:

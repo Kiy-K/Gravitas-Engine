@@ -20,6 +20,7 @@ Token budget: ~600 tokens per turn summary to stay within Mistral-small rate lim
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -694,9 +695,23 @@ def summarize_turn(game: GameState, faction_id: int) -> str:
     # ── Intel Reports ─────────────────────────────────────────────────── #
     if game.intelligence is not None and faction_id in game.intelligence.factions:
         fis = game.intelligence.factions[faction_id]
+
+        # Show active spy rings (so LLMs don't re-plant)
+        active_rings = [r for r in fis.spy_rings if r.is_active]
+        if active_rings:
+            ring_locs = []
+            for ring in active_rings:
+                loc = game.cluster_names[ring.target_cluster] if ring.target_cluster < len(game.cluster_names) else f"C{ring.target_cluster}"
+                est = "established" if ring.is_established else "embedding"
+                ring_locs.append(f"{loc}({est})")
+            lines.append("")
+            lines.append(f"SPY RINGS ({len(active_rings)}/5 max, DO NOT re-plant in these cities): {', '.join(ring_locs)}")
+        else:
+            lines.append("")
+            lines.append("SPY RINGS: None active. Use PLANT_SPY city to establish intelligence.")
+
         recent_reports = [r for r in fis.reports if r.turn_received >= game.turn - 3]
         if recent_reports:
-            lines.append("")
             lines.append("RECENT INTEL REPORTS:")
             for r in recent_reports[-3:]:
                 rel = r.reliability.name
@@ -991,7 +1006,7 @@ def parse_action(action_text: str, game: GameState, faction_id: int) -> List[Dic
 
     # Clean text: strip markdown, bullets, numbering, quotes
     clean = action_text.strip()
-    for junk in ["```", "**", "Order 1:", "Order 2:", "Order 3:", "Action 1:", "Action 2:", "Action 3:"]:
+    for junk in ["```", "**"]:
         clean = clean.replace(junk, "")
 
     for line in clean.split("\n"):
@@ -1000,6 +1015,11 @@ def parse_action(action_text: str, game: GameState, faction_id: int) -> List[Dic
             continue
         if len(line) > 200:
             continue  # skip prose paragraphs
+
+        # Strip common LLM prefixes: "ORDER 1:", "Action 2:", "My Order:", etc.
+        line = re.sub(r'^(?:ORDER|ACTION|MY\s+ORDER|DIRECTIVE)\s*\d*\s*[:.\-]\s*', '', line, flags=re.IGNORECASE).strip()
+        if not line:
+            continue
 
         parts = line.split()
         if not parts:
@@ -1228,6 +1248,12 @@ def apply_actions(game: GameState, faction_id: int, actions: List[Dict[str, Any]
             inv_type_str = act.get("inv_type", "prepared")
             inv_type_map = {"prepared": InvasionType.PREPARED, "reckless": InvasionType.RECKLESS, "airborne": InvasionType.AIRBORNE}
             inv_type = inv_type_map.get(inv_type_str, InvasionType.PREPARED)
+
+            # Ownership check: can't invade your own territory
+            if game.cluster_owners.get(act["target"]) == faction_id:
+                target_name = game.cluster_names[act["target"]] if act["target"] < len(game.cluster_names) else f"C{act['target']}"
+                results.append(f"Cannot invade {target_name} — it is YOUR territory.")
+                continue
 
             # Deduplication: reject if already planning/executing invasion to same target
             existing = [inv for inv in game.invasions
@@ -1665,8 +1691,10 @@ DECISION TREE (read your cell count each week):
   0-2 cells: RECRUIT RECRUIT. Build the network. Pick hungry/bombed cities first.
   3+ cells, 0-2 arms: STEAL_ARMS + RECRUIT. Arm up. Target bombed cities.
   3+ arms, 5+ cells, cooldown READY: BROADCAST + SABOTAGE. Now you strike.
-  Heat > 40%: MOVE to a safer city + RECRUIT there.
-  Heat DANGEROUS: LIE_LOW (only if no safe city to move to).
+  5+ arms, 5+ cells: SABOTAGE + STEAL_ARMS. Keep pressure, keep arming.
+  Heat > 60%: RECRUIT in a DIFFERENT city (spreads heat). Only MOVE if heat > 80%.
+  Heat DANGEROUS (>80%): MOVE once, then immediately act (RECRUIT or STEAL_ARMS).
+  ⚠ MOVE wastes half your turn. NEVER move twice. NEVER move if heat < 60%.
 
 ACTIONS (pick exactly 2, one per line):
   RECRUIT city count     — grow a cell (hungry/bombed cities = easier)
@@ -1674,18 +1702,22 @@ ACTIONS (pick exactly 2, one per line):
   SABOTAGE city          — disrupt factories (needs cell there, easier if trust low)
   BROADCAST              — pirate telescreen (needs cooldown READY, boosts all cells)
   COORDINATE             — link cells (needs cooldown READY)
-  MOVE city              — relocate Winston, drops heat
+  MOVE city              — relocate Winston (ONLY if heat > 80%. Wastes half your turn!)
   CONTACT_EURASIA        — channel with Eurasia (risky but powerful)
-  LIE_LOW                — hide (ONLY if heat dangerous)
+  LIE_LOW                — hide (ONLY if heat > 80% AND no safe city to move to)
   INSPIRE                — pamphlets (weak, last resort)
 
 === EXAMPLE WEEK 5 (early, 1 cell, London hungry) ===
 RECRUIT Liverpool 15
 RECRUIT Glasgow 10
 
-=== EXAMPLE WEEK 20 (3 cells, Dover bombed, 0 arms) ===
+=== EXAMPLE WEEK 12 (3 cells, Dover bombed, 0 arms, heat 45%) ===
 STEAL_ARMS Dover
-RECRUIT Manchester 12"""
+RECRUIT Manchester 12
+
+=== EXAMPLE WEEK 30 (5 cells, 4 arms, cooldown READY, heat 35%) ===
+BROADCAST
+SABOTAGE London"""
 
 
 def summarize_blf_turn(game: GameState) -> str:

@@ -281,6 +281,8 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
 
         actions_0 = parse_action(response_0, game, faction_id=0)
         results_0 = apply_actions(game, faction_id=0, actions=actions_0, rng=rng)
+        oceania_llm.actions_parsed += len(actions_0)
+        oceania_llm.actions_noop += sum(1 for a in actions_0 if a.get('type') == 'noop')
 
         print(f"  ⚙ Big Brother's Military Council ({t_api_0:.1f}s):")
         for r in results_0:
@@ -297,6 +299,8 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
 
         actions_1 = parse_action(response_1, game, faction_id=1)
         results_1 = apply_actions(game, faction_id=1, actions=actions_1, rng=rng)
+        eurasia_llm.actions_parsed += len(actions_1)
+        eurasia_llm.actions_noop += sum(1 for a in actions_1 if a.get('type') == 'noop')
 
         print(f"  ☭ Supreme Marshal Kalinin ({t_api_1:.1f}s):")
         for r in results_1:
@@ -316,6 +320,7 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
 
             blf_actions = parse_blf_action(winston_response, game)
             winston_results = apply_blf_actions(game, blf_actions, rng)
+            winston_llm.actions_parsed += len(blf_actions)
 
             print(f"\n  👻 The Ghost of London ({t_api_w:.1f}s):")
             for r in winston_results:

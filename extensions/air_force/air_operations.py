@@ -207,24 +207,25 @@ def step_air(
         for sq in wing.squadrons:
             sq.sorties_today = 0
 
-    # ── 3. CAP engagements (fighters on CAP intercept enemy aircraft) ── #
-    # Simplified: any wing with CAP fighters near enemy bombers triggers battle
+    # ── 3. CAP engagements (fighters intercept enemy aircraft) ─────── #
+    # STANDBY fighters scramble when enemy detected — they don't just sit
+    # at the airfield while bombers fly overhead. CAP/INTERCEPT have full
+    # strength; STANDBY scrambles at 70% effectiveness (reaction delay).
+    _ENGAGE_MISSIONS = ("CAP", "INTERCEPT", "STANDBY")
     for zone in aw.air_zones:
         faction_wings: Dict[int, List[AircraftSquadron]] = {}
         for wing in aw.air_wings:
             for sq in wing.squadrons:
-                if sq.is_operational:
+                if sq.is_operational and sq.stats.role == AircraftRole.FIGHTER:
                     faction_wings.setdefault(wing.faction_id, []).append(sq)
 
         fids = list(faction_wings.keys())
         for i in range(len(fids)):
             for j in range(i + 1, len(fids)):
                 fighters_a = [sq for sq in faction_wings[fids[i]]
-                              if sq.stats.role == AircraftRole.FIGHTER
-                              and sq.mission in ("CAP", "INTERCEPT")]
+                              if sq.mission in _ENGAGE_MISSIONS]
                 fighters_b = [sq for sq in faction_wings[fids[j]]
-                              if sq.stats.role == AircraftRole.FIGHTER
-                              and sq.mission in ("CAP", "INTERCEPT")]
+                              if sq.mission in _ENGAGE_MISSIONS]
                 if fighters_a and fighters_b:
                     result = resolve_air_battle(fighters_a, fighters_b, zone.cloud_cover, rng, dt)
                     feedback["air_battles"] += 1
