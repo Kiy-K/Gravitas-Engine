@@ -10,42 +10,28 @@
 #   2. training/regimes/
 #
 
-scenario: stalingrad
-max_steps: 500
+scenario: airstrip_one
+max_steps: 600
 verbose: true
 
 # ── Plugins ─────────────────────────────────────────────────────────────── #
 # Plugins are loaded in order and executed sequentially on each step.
 # Available built-in plugins:
-#   - soviet_reinforcements  (Volga barge crossings)
-#   - axis_airlift           (Luftwaffe supply drops)
+#   - partisan_warfare       (Resistance cells behind enemy lines)
+#   - logistics_network      (Supply chain interdiction)
+#   - nonlinear_combat       (Non-linear combat dynamics)
 
 plugins:
-  - soviet_reinforcements
-  - axis_airlift
+  - nonlinear_combat
+  - logistics_network
 
 # ── Plugin-specific configuration ───────────────────────────────────────── #
-# Each key must match a plugin name above. Missing keys use plugin defaults.
 
 plugin_configs:
-  soviet_reinforcements:
-    trigger_turn_interval: 50     # Check every N turns
-    volga_cluster: 3              # Volga Crossing sector index
-    reserve_cluster: 6            # Soviet Strategic Reserve sector index
-    sigma_threshold: 0.5          # Min stability to allow crossing
-    hazard_threshold: 0.7         # Max hazard before barges are blocked
-    military_boost: 0.10          # +10% military per delivery
-    resource_boost: 0.05          # +5% resources per delivery
-    military_cap: 0.95            # Max military (prevent invincibility)
-    resource_cap: 1.0             # Max resources
-    soviet_clusters: [3, 6]       # Soviet-controlled clusters
+  nonlinear_combat:
+    terrain_modifier: 1.2
+    fortification_bonus: 0.35
 
-  axis_airlift:
-    trigger_turn_interval: 40     # Luftwaffe attempts every 40 turns
-    supply_corridor_cluster: 5    # Axis Supply Corridor sector
-    target_clusters: [0, 1, 2]    # Encircled Axis sectors in Stalingrad
-    sigma_threshold: 0.3          # Min corridor stability for flights
-    hazard_threshold: 0.8         # Max corridor hazard for flights
-    base_resource_boost: 0.04     # Starting resource boost per delivery
-    decay_rate: 0.005             # Boost decay per delivery (historical degradation)
-    resource_cap: 1.0             # Max resources
+  logistics_network:
+    disruption_threshold: 0.4
+    repair_rate: 0.02
