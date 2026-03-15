@@ -978,6 +978,24 @@ def summarize_turn(game: GameState, faction_id: int) -> str:
         lines.append("")
         lines.append("LAND FORCES: " + land_summary(game.land, faction_id, game.cluster_owners, game.cluster_names))
 
+    # ── Invasion Alerts (planning just completed → assembling!) ────────── #
+    for inv in game.invasions:
+        if inv.is_active and inv.faction_id == faction_id:
+            target = game.cluster_names[inv.target_cluster] if inv.target_cluster < len(game.cluster_names) else f"C{inv.target_cluster}"
+            if inv.phase.name == "ASSEMBLY" and inv.assembly_steps_done <= 1:
+                lines.append("")
+                lines.append(f"⚡ INVASION READY: Planning complete for {target}! Troops assembling. Launch imminent.")
+            elif inv.phase.name == "CROSSING":
+                lines.append("")
+                lines.append(f"⚡ FLEET CROSSING: Invasion force en route to {target}! Provide air cover!")
+            elif inv.phase.name == "BEACH_ASSAULT":
+                lines.append("")
+                lines.append(f"⚡⚡ BEACH ASSAULT: Troops landing at {target}! Strength {inv.beachhead_strength:.0%}. Support with CAS/SHORE_BOMBARD!")
+            elif inv.phase.name == "AIRDROP" or (inv.phase.name == "PLANNING" and inv.planning_steps_done >= inv.planning_steps_required - 1):
+                if inv.planning_steps_done >= inv.planning_steps_required - 1 and inv.phase.name == "PLANNING":
+                    lines.append("")
+                    lines.append(f"⏰ INVASION ALMOST READY: {target} — 1 turn until launch!")
+
     # ── Invasions (show ALL own plans so LLM doesn't re-plan) ────────── #
     my_inv = [inv for inv in game.invasions if inv.is_active and inv.faction_id == faction_id]
     enemy_inv = [inv for inv in game.invasions if inv.is_active and inv.faction_id != faction_id and inv.detected_by_enemy]

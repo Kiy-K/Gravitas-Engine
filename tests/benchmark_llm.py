@@ -277,24 +277,88 @@ def run_benchmark(args: argparse.Namespace) -> Dict:
                           and not game.resistance.winston.is_captured)
         blf_summary = summarize_blf_turn(game) if winston_active else ""
 
+        # ── Build turn history context (budget saver) ────────────────── #
+        # Condensed summary of older turns + full detail for last 5 turns
+        # Saves ~50-60% tokens vs repeating full state every call
+        DETAIL_TURNS = 5
+        history_lines = []
+        if len(turn_log) > DETAIL_TURNS:
+            # Condensed summary of old turns (1 line each)
+            history_lines.append("=== PREVIOUS TURNS (condensed) ===")
+            for entry in turn_log[:-DETAIL_TURNS]:
+                t = entry["turn"]
+                scores = entry.get("scores", {})
+                o_s = int(scores.get("0", scores.get(0, 0)))
+                e_s = int(scores.get("1", scores.get(1, 0)))
+                # Show just the action results as a brief line
+                o_acts = "; ".join(entry.get("oceania_results", [])[:2])
+                e_acts = "; ".join(entry.get("eurasia_results", [])[:2])
+                history_lines.append(f"T{t}: O={o_s} E={e_s} | O:[{o_acts[:80]}] E:[{e_acts[:80]}]")
+            history_lines.append("")
+
+        if len(turn_log) > 0:
+            # Full detail for last 5 turns
+            recent = turn_log[-DETAIL_TURNS:]
+            if recent:
+                history_lines.append("=== RECENT TURNS (full detail) ===")
+                for entry in recent:
+                    t = entry["turn"]
+                    history_lines.append(f"--- Turn {t} ---")
+                    history_lines.append(f"  Your actions: {'; '.join(entry.get('oceania_results', []))}")
+                    history_lines.append(f"  Enemy actions: {'; '.join(entry.get('eurasia_results', []))}")
+                    if entry.get("winston_results"):
+                        history_lines.append(f"  BLF: {'; '.join(entry['winston_results'])}")
+                history_lines.append("")
+
+        history_block = "\n".join(history_lines) if history_lines else ""
+
+        # Build Eurasia's history (swap perspective)
+        e_history_lines = []
+        if len(turn_log) > DETAIL_TURNS:
+            e_history_lines.append("=== PREVIOUS TURNS (condensed) ===")
+            for entry in turn_log[:-DETAIL_TURNS]:
+                t = entry["turn"]
+                scores = entry.get("scores", {})
+                o_s = int(scores.get("0", scores.get(0, 0)))
+                e_s = int(scores.get("1", scores.get(1, 0)))
+                e_acts = "; ".join(entry.get("eurasia_results", [])[:2])
+                o_acts = "; ".join(entry.get("oceania_results", [])[:2])
+                e_history_lines.append(f"T{t}: E={e_s} O={o_s} | You:[{e_acts[:80]}] Enemy:[{o_acts[:80]}]")
+            e_history_lines.append("")
+        if len(turn_log) > 0:
+            recent = turn_log[-DETAIL_TURNS:]
+            if recent:
+                e_history_lines.append("=== RECENT TURNS (full detail) ===")
+                for entry in recent:
+                    t = entry["turn"]
+                    e_history_lines.append(f"--- Turn {t} ---")
+                    e_history_lines.append(f"  Your actions: {'; '.join(entry.get('eurasia_results', []))}")
+                    e_history_lines.append(f"  Enemy actions: {'; '.join(entry.get('oceania_results', []))}")
+                    if entry.get("winston_results"):
+                        e_history_lines.append(f"  BLF: {'; '.join(entry['winston_results'])}")
+                e_history_lines.append("")
+        e_history_block = "\n".join(e_history_lines) if e_history_lines else ""
+
+        # Prepend history to summaries
+        full_summary_0 = history_block + summary_0 if history_block else summary_0
+        full_summary_1 = e_history_block + summary_1 if e_history_block else summary_1
+
         if args.verbose:
-            print(f"\n[Oceania Briefing]\n{summary_0[:500]}...")
-            print(f"\n[Eurasia Briefing]\n{summary_1[:500]}...")
+            print(f"\n[Oceania Briefing]\n{full_summary_0[:500]}...")
+            print(f"\n[Eurasia Briefing]\n{full_summary_1[:500]}...")
             if winston_active:
                 print(f"\n[The Ghost's Briefing]\n{blf_summary[:400]}...")
 
         # ── PARALLEL LLM calls (3x speedup) ─────────────────────────── #
-        # All 3 factions read the SAME game state snapshot. Their API
-        # calls are independent — fire concurrently, apply sequentially.
         from concurrent.futures import ThreadPoolExecutor
 
         t_parallel_start = time.time()
 
         def _call_oceania():
-            return oceania_llm.chat(OCEANIA_SYSTEM_PROMPT, summary_0)
+            return oceania_llm.chat(OCEANIA_SYSTEM_PROMPT, full_summary_0)
 
         def _call_eurasia():
-            return eurasia_llm.chat(EURASIA_SYSTEM_PROMPT, summary_1)
+            return eurasia_llm.chat(EURASIA_SYSTEM_PROMPT, full_summary_1)
 
         def _call_winston():
             if winston_active:
