@@ -102,7 +102,6 @@ from gravitas_engine.systems.national_spirit import (
 @dataclass
 class GameState:
     """Complete integrated game state for Air Strip One."""
-    war_economy: Any        # WarEconomyWorld
     manpower_clusters: list  # List[ClusterManpower]
     manpower_policies: dict  # Dict[int, FactionManpowerPolicy]
     naval: Any              # NavalWorld
@@ -328,10 +327,6 @@ def create_game(seed: int = 42, max_turns: int = 100) -> GameState:
     ], dtype=np.float64)
 
     n = len(cluster_names)
-    war_econ = initialize_war_economy(
-        n_clusters=n, faction_ids=[0, 1],
-        cluster_owners=cluster_owners, terrain_types=terrain_types, rng=rng,
-    )
     mp_clusters, mp_policies = initialize_manpower(
         n_clusters=n, faction_ids=[0, 1],
         cluster_owners=cluster_owners, terrain_types=terrain_types, rng=rng,
@@ -481,7 +476,6 @@ def create_game(seed: int = 42, max_turns: int = 100) -> GameState:
     )
 
     return GameState(
-        war_economy=war_econ,
         manpower_clusters=mp_clusters,
         manpower_policies=mp_policies,
         naval=naval,
@@ -524,13 +518,7 @@ def step_game(game: GameState, rng: np.random.Generator, dt: float = 1.0) -> Dic
         weather_fb = apply_weather_effects(game.weather, game)
         feedback["weather"] = weather_fb
 
-    # 1a. War Economy (legacy)
-    game.war_economy = step_war_economy(
-        game.war_economy, game.cluster_data, game.population,
-        game.cluster_owners, None, game.terrain_types, dt,
-    )
-
-    # 1b. Economy (GDP, factories, production)
+    # 1. Economy (unified GDP + factories + stockpiles)
     if game.economy is not None:
         game.economy, econ_fb = step_economy_v2(game.economy, game.cluster_owners, rng, dt)
         feedback["economy"] = econ_fb
@@ -577,7 +565,7 @@ def step_game(game: GameState, rng: np.random.Generator, dt: float = 1.0) -> Dic
         policy = game.manpower_policies.get(owner)
         if policy is None:
             continue
-        food_ratio = game.war_economy.cluster_economies[i].stockpile_ratio(Resource.PROCESSED_FOOD)
+        food_ratio = game.economy.clusters[i].stockpile_ratio(Resource.PROCESSED_FOOD) if game.economy and i < len(game.economy.clusters) else 0.5
         gdp = float(game.cluster_data[i, 2])  # use resource as GDP proxy
         game.manpower_clusters[i], mp_fb = step_manpower(mp, policy, game.cluster_data[i, 1], food_ratio, gdp, dt)
 
@@ -612,8 +600,9 @@ def step_game(game: GameState, rng: np.random.Generator, dt: float = 1.0) -> Dic
     if game.resistance is not None:
         food_ratios = {}
         unemp_rates = {}
-        for ce in game.war_economy.cluster_economies:
-            food_ratios[ce.cluster_id] = ce.stockpile_ratio(Resource.PROCESSED_FOOD)
+        if game.economy:
+            for ce in game.economy.clusters:
+                food_ratios[ce.cluster_id] = ce.stockpile_ratio(Resource.PROCESSED_FOOD)
         for i, mp in enumerate(game.manpower_clusters):
             unemp_rates[i] = mp.unemployment_rate
         eurasia_beachhead = any(inv.phase.name == "BEACHHEAD" and inv.faction_id == 1
@@ -727,11 +716,13 @@ def step_game(game: GameState, rng: np.random.Generator, dt: float = 1.0) -> Dic
         if game.land is not None:
             for units in game.land.garrisons.values():
                 land_units += sum(1 for u in units if u.is_alive and u.faction_id == fid)
-        total_stockpile = sum(
-            float(np.sum(ce.resource_stockpile))
-            for ce in game.war_economy.cluster_economies
-            if game.cluster_owners.get(ce.cluster_id) == fid
-        )
+        total_stockpile = 0.0
+        if game.economy:
+            total_stockpile = sum(
+                float(np.sum(ce.resource_stockpile))
+                for ce in game.economy.clusters
+                if game.cluster_owners.get(ce.cluster_id) == fid
+            )
         game.faction_scores[fid] += owned * 2.0 + ships * 0.5 + squadrons * 0.3 + land_units * 0.4 + total_stockpile * 0.01
 
     game.turn += 1
@@ -915,12 +906,13 @@ def summarize_turn(game: GameState, faction_id: int) -> str:
     lines.append("")
     lines.append("SUPPLIES:")
     shortages = []
-    for ce in game.war_economy.cluster_economies:
-        if game.cluster_owners.get(ce.cluster_id) != faction_id:
-            continue
-        for r in [Resource.FUEL, Resource.STEEL, Resource.PROCESSED_FOOD, Resource.AMMUNITION]:
-            if ce.stockpile_ratio(r) < 0.2:
-                shortages.append(f"{r.name} in {game.cluster_names[ce.cluster_id]}")
+    if game.economy:
+        for ce in game.economy.clusters:
+            if game.cluster_owners.get(ce.cluster_id) != faction_id:
+                continue
+            for r_name in ["FUEL", "STEEL", "PROCESSED_FOOD", "AMMUNITION"]:
+                if ce.stockpile_ratio(r_name) < 0.2:
+                    shortages.append(f"{r_name} in {game.cluster_names[ce.cluster_id]}")
 
     if shortages:
         lines.append(f"  SHORTAGES: {', '.join(shortages[:5])}")
@@ -928,11 +920,12 @@ def summarize_turn(game: GameState, faction_id: int) -> str:
         lines.append("  Supply lines adequate. No critical shortages.")
 
     # Manufacturing priority
-    fe = game.war_economy.faction_economies.get(faction_id)
-    if fe:
-        mp = "military-focused" if fe.manufacturing_priority > 0.6 else "balanced" if fe.manufacturing_priority > 0.4 else "civilian-focused"
-        debt = "low" if fe.fiscal_debt < 0.3 else "moderate" if fe.fiscal_debt < 0.6 else "high"
-        lines.append(f"  Production: {mp}. Debt: {debt}. Inflation: {fe.inflation:.1%}")
+    if game.economy:
+        fe = game.economy.factions.get(faction_id)
+        if fe:
+            mp_label = "military-focused" if fe.manufacturing_priority > 0.6 else "balanced" if fe.manufacturing_priority > 0.4 else "civilian-focused"
+            debt = "low" if fe.fiscal_debt < 0.3 else "moderate" if fe.fiscal_debt < 0.6 else "high"
+            lines.append(f"  Production: {mp_label}. Debt: {debt}. Inflation: {fe.inflation:.1%}")
 
     # ── Manpower ──────────────────────────────────────────────────────── #
     lines.append("")
@@ -1379,15 +1372,16 @@ def apply_actions(game: GameState, faction_id: int, actions: List[Dict[str, Any]
             results.append("No action taken.")
 
         elif t == "set_manufacturing":
-            fe = game.war_economy.faction_economies.get(faction_id)
-            if fe:
-                fe.manufacturing_priority = act["priority"]
-                results.append(f"Manufacturing priority set to {act['priority']:.0%} military.")
+            if game.economy:
+                fe = game.economy.factions.get(faction_id)
+                if fe:
+                    fe.manufacturing_priority = act["priority"]
+                    results.append(f"Manufacturing priority set to {act['priority']:.0%} military.")
 
         elif t == "war_bonds":
             cid = act["cluster"]
-            if game.cluster_owners.get(cid) == faction_id and cid < len(game.war_economy.cluster_economies):
-                ce = game.war_economy.cluster_economies[cid]
+            if game.economy and game.cluster_owners.get(cid) == faction_id and cid < len(game.economy.clusters):
+                ce = game.economy.clusters[cid]
                 if not ce.war_bond_active:
                     ce.war_bond_active = True
                     ce.war_bond_remaining = 30
@@ -1538,7 +1532,10 @@ def apply_actions(game: GameState, faction_id: int, actions: List[Dict[str, Any]
                 results.append("Communication codes changed. 3-turn coordination penalty.")
 
         elif t == "sanctions":
-            game.war_economy.faction_economies[faction_id].sanctions_imposed[enemy_id] = act["intensity"]
+            if game.economy:
+                fe = game.economy.factions.get(faction_id)
+                if fe:
+                    fe.sanctions_imposed[enemy_id] = act["intensity"]
             results.append(f"Economic sanctions imposed at {act['intensity']:.0%} intensity.")
 
         elif t == "support_blf":
@@ -2317,7 +2314,7 @@ def generate_visible_events(game: GameState, feedback: Dict[str, Any]) -> str:
 
     # ── Factory activity (smoke, noise, strikes) ──────────────────── #
     factory_events = []
-    for ce in game.war_economy.cluster_economies:
+    for ce in (game.economy.clusters if game.economy else []):
         if game.cluster_owners.get(ce.cluster_id) is None:
             continue
         name = game.cluster_names[ce.cluster_id] if ce.cluster_id < len(game.cluster_names) else f"C{ce.cluster_id}"

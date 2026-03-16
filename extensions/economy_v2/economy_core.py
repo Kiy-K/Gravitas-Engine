@@ -326,11 +326,38 @@ class ClusterEconomy:
     def airfield_output(self) -> float:
         return sum(f.effective_output for f in self.factories if f.factory_type == FactoryType.AIRFIELD) * min(1.0, self.power_ratio)
 
+    # War bond state (merged from war_economy)
+    war_bond_active: bool = False
+    war_bond_remaining: int = 0
+
     def factory_of_type(self, ft: FactoryType) -> Optional[Factory]:
         for f in self.factories:
             if f.factory_type == ft:
                 return f
         return None
+
+    def stockpile_ratio(self, resource_name: str) -> float:
+        """Compatibility: get stockpile ratio by resource name string.
+        Maps legacy Resource names to economy_v2 stockpiles."""
+        _map = {
+            "PROCESSED_FOOD": (self.food_stockpile, 100.0),
+            "FUEL": (self.fuel_stockpile, 50.0),
+            "STEEL": (self.steel_stockpile, 40.0),
+            "AMMUNITION": (self.ammo_stockpile, 50.0),
+        }
+        if isinstance(resource_name, str):
+            pair = _map.get(resource_name, (0, 1))
+        else:
+            # Handle Resource enum objects
+            pair = _map.get(getattr(resource_name, 'name', ''), (0, 1))
+        return min(1.0, pair[0] / max(pair[1], 0.01))
+
+    @property
+    def resource_stockpile(self) -> np.ndarray:
+        """Compatibility: return stockpiles as array for scoring."""
+        return np.array([self.food_stockpile, self.fuel_stockpile,
+                         self.steel_stockpile, self.ammo_stockpile,
+                         self.equipment_stockpile], dtype=np.float64)
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
@@ -349,6 +376,11 @@ class FactionEconomy:
     total_gdp: float = 0.0           # calculated each turn
     gdp_per_capita: float = 0.0
     war_weariness: float = 0.0       # 0-1, grows with casualties + time
+
+    # Merged from war_economy (unified model)
+    manufacturing_priority: float = 0.5  # 0=civilian, 1=military
+    fiscal_debt: float = 0.0             # war bonds debt
+    sanctions_imposed: Dict[int, float] = field(default_factory=dict)  # target_fid → intensity
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
