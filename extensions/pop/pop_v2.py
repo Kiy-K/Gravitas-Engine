@@ -148,10 +148,20 @@ class ClusterPop:
 
     # Demographics
     working_age_ratio: float = 0.62     # 62% are 16-65
-    birth_rate: float = 0.0008          # per turn
-    death_rate: float = 0.0003          # per turn natural
+    # Class-based birth rates (per person per WEEK)
+    # Proles: ~4-5 children per family, large households, uneducated
+    # Outer Party: ~1-2 children, small families, surveilled
+    # Inner Party: ~0-1 children, almost no families, married to the Party
+    birth_rate_proles: float = 0.00045  # ~2.3% annual — large prole families
+    birth_rate_outer: float = 0.00015   # ~0.8% annual — small families
+    birth_rate_inner: float = 0.00004   # ~0.2% annual — almost no reproduction
+    death_rate: float = 0.00020         # ~1.0% annual natural death rate
     war_deaths_this_turn: int = 0
     civilian_deaths_this_turn: int = 0
+    births_this_turn: int = 0
+    starvation_deaths_this_turn: int = 0
+    bombing_deaths_this_turn: int = 0
+    new_manpower_this_turn: int = 0     # grown-up pop entering workforce
 
     # Military state
     active_military: int = 0
@@ -287,11 +297,14 @@ CLUSTER_POPULATIONS = {
     24:    195,  # Lille — Nord-Pas-de-Calais industrial + coal
     25:  1_100,  # Brussels — Belgian capital, Benelux Command
     26:    260,  # Antwerp — major port, North Sea fleet
-    27:  5_000,  # Paris — metro area (1954 census: ~5M metro)
-    28:     85,  # Orleans — Loire logistics hub
-    29:    530,  # Lyon — Rhône-Alpes industrial center
-    30:    120,  # Brest — Finistère naval base, submarine pens
-    31:    250,  # Bordeaux — Gironde, southern reserves
+    27:    750,  # Rotterdam — Europoort, North Sea Fleet Pride
+    28:    870,  # Amsterdam — trade, finance, industry
+    29:    200,  # Luxembourg — steel industry, quiet rear area
+    30:  5_000,  # Paris — metro area (1954 census: ~5M metro)
+    31:     85,  # Orleans — Loire logistics hub
+    32:    530,  # Lyon — Rhône-Alpes industrial center
+    33:    120,  # Brest — Finistère naval base, submarine pens
+    34:    250,  # Bordeaux — Gironde, southern reserves
 }
 
 
@@ -423,42 +436,97 @@ def step_pop_v2(
     """Advance population by one turn."""
     feedback: Dict[str, Any] = {}
 
+    total_births_all = 0
+    total_deaths_all = 0
+
     for cp in world.clusters:
-        # ── 1. Natural population growth ──────────────────────────────── #
-        births = int(cp.total_pop * cp.birth_rate * dt)
-        natural_deaths = int(cp.total_pop * cp.death_rate * dt)
+        cp.births_this_turn = 0
+        cp.starvation_deaths_this_turn = 0
+        cp.bombing_deaths_this_turn = 0
+        cp.new_manpower_this_turn = 0
 
-        # Births go to proles (most births are proles)
-        cp.proles += int(births * 0.90)
-        cp.outer_party += int(births * 0.08)
-        cp.inner_party += int(births * 0.02)
+        # ── 1. Class-based population growth (Proles breed fast!) ───── #
+        # Proles: large families, uneducated, 4-5 children per woman
+        # Outer Party: small families, surveilled, stressed, 1-2 children
+        # Inner Party: married to the Party, almost zero reproduction
+        prole_births = int(cp.proles * cp.birth_rate_proles * dt)
+        outer_births = int(cp.outer_party * cp.birth_rate_outer * dt)
+        inner_births = int(cp.inner_party * cp.birth_rate_inner * dt)
 
-        # Deaths proportional to class size
-        for _ in range(natural_deaths):
-            r = rng.random()
-            if r < 0.85:
-                cp.proles = max(0, cp.proles - 1)
-            elif r < 0.98:
-                cp.outer_party = max(0, cp.outer_party - 1)
-            else:
-                cp.inner_party = max(0, cp.inner_party - 1)
-
-        cp.total_pop = cp.inner_party + cp.outer_party + cp.proles
-
-        # ── 2. Food → starvation ──────────────────────────────────────── #
+        # Starvation suppresses birth rate
         food = food_available.get(cp.cluster_id, 50.0)
         food_per_capita = food / max(cp.total_pop / 100_000, 0.01)
         if food_per_capita < 0.3:
-            # Starvation — proles suffer most
-            starve = int(cp.proles * 0.002 * (0.3 - food_per_capita) * 10 * dt)
-            cp.proles = max(1000, cp.proles - starve)
-            cp.civilian_deaths_this_turn += starve
+            prole_births = int(prole_births * food_per_capita / 0.3)
+
+        # Add births to population
+        cp.proles += prole_births
+        cp.outer_party += outer_births
+        cp.inner_party += inner_births
+        total_births = prole_births + outer_births + inner_births
+        cp.births_this_turn = total_births
+        total_births_all += total_births
+
+        # ── 1b. Natural deaths (age, disease) ─────────────────────── #
+        natural_deaths_p = int(cp.proles * cp.death_rate * dt)
+        natural_deaths_o = int(cp.outer_party * cp.death_rate * 0.8 * dt)  # better healthcare
+        natural_deaths_i = int(cp.inner_party * cp.death_rate * 0.5 * dt)  # best healthcare
+        cp.proles = max(100, cp.proles - natural_deaths_p)
+        cp.outer_party = max(10, cp.outer_party - natural_deaths_o)
+        cp.inner_party = max(1, cp.inner_party - natural_deaths_i)
+        total_natural = natural_deaths_p + natural_deaths_o + natural_deaths_i
+        total_deaths_all += total_natural
+
+        cp.total_pop = cp.inner_party + cp.outer_party + cp.proles
+
+        # ── 1c. Grown-up pop enters manpower pool ─────────────────── #
+        # Each week, a fraction of the population "comes of age" (turns 16)
+        # and enters the working-age pool as unemployed proles/outer party
+        new_workers = int(cp.total_pop * 0.00025 * dt)  # ~1.3% annual maturation
+        # Most new workers are proles (85% of births were proles)
+        new_prole_workers = int(new_workers * 0.88)
+        new_outer_workers = new_workers - new_prole_workers
+        cp.jobs[SocialClass.PROLES.value, JobType.UNEMPLOYED.value] += new_prole_workers
+        cp.jobs[SocialClass.OUTER_PARTY.value, JobType.UNEMPLOYED.value] += new_outer_workers
+        cp.new_manpower_this_turn = new_workers
+
+        # ── 2. Food → starvation (Proles die first, Inner Party last) ─── #
+        if food_per_capita < 0.3:
+            severity = (0.3 - food_per_capita) * 10  # 0-3 scale
+            # Proles starve first (no access to Party stores)
+            starve_proles = int(cp.proles * 0.002 * severity * dt)
+            # Outer Party: some access to rations
+            starve_outer = int(cp.outer_party * 0.0005 * severity * dt) if food_per_capita < 0.15 else 0
+            # Inner Party: always fed (special stores), only starve in total famine
+            starve_inner = int(cp.inner_party * 0.0001 * severity * dt) if food_per_capita < 0.05 else 0
+
+            cp.proles = max(100, cp.proles - starve_proles)
+            cp.outer_party = max(10, cp.outer_party - starve_outer)
+            cp.inner_party = max(1, cp.inner_party - starve_inner)
+            total_starve = starve_proles + starve_outer + starve_inner
+            cp.starvation_deaths_this_turn = total_starve
+            cp.civilian_deaths_this_turn += total_starve
+            total_deaths_all += total_starve
             cp.total_pop = cp.inner_party + cp.outer_party + cp.proles
-            # Starvation radicalizes
+
+            # Starvation radicalizes proles
             cp.radicalization[SocialClass.PROLES.value] = min(1.0,
-                cp.radicalization[SocialClass.PROLES.value] + 0.02 * dt)
+                cp.radicalization[SocialClass.PROLES.value] + 0.02 * severity * dt)
             cp.satisfaction[SocialClass.PROLES.value] = max(0.0,
-                cp.satisfaction[SocialClass.PROLES.value] - 0.03 * dt)
+                cp.satisfaction[SocialClass.PROLES.value] - 0.03 * severity * dt)
+
+        # ── 2b. Bombing casualties (from cluster hazard level) ───────── #
+        if cp.cluster_id < len(world.clusters):
+            # Higher hazard = more civilian deaths from bombing
+            # hazard is in cluster_data[cid, 1] but we approximate from satisfaction
+            hazard_proxy = max(0, 1.0 - float(cp.satisfaction.mean()))
+            if hazard_proxy > 0.3:
+                bomb_deaths = int(cp.proles * 0.0005 * (hazard_proxy - 0.3) * dt)
+                cp.proles = max(100, cp.proles - bomb_deaths)
+                cp.bombing_deaths_this_turn = bomb_deaths
+                cp.civilian_deaths_this_turn += bomb_deaths
+                total_deaths_all += bomb_deaths
+                cp.total_pop = cp.inner_party + cp.outer_party + cp.proles
 
         # ── 3. Training pipeline ──────────────────────────────────────── #
         if cp.in_training > 0 and cp.training_turns_left > 0:
