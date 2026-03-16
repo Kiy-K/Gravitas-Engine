@@ -357,6 +357,14 @@ def _generate_auto_tasks(ministry: Ministry, game: Any, fid: int, rng: np.random
     if len(ministry.active_tasks) >= 3:
         return
 
+    try:
+        _generate_auto_tasks_inner(ministry, game, fid, rng, dt, budget, eff)
+    except Exception as e:
+        ministry.problems.append(f"Ministry error: {str(e)[:80]}")
+
+
+def _generate_auto_tasks_inner(ministry: Ministry, game: Any, fid: int, rng: np.random.Generator, dt: float, budget: float, eff: float):
+    """Inner implementation — wrapped by _generate_auto_tasks for safety."""
     if ministry.ministry_type == MinistryType.PEACE:
         # ── Minipax: auto-repair damaged ships, rotate tired squadrons ── #
         if game.naval is not None:
@@ -366,7 +374,7 @@ def _generate_auto_tasks(ministry: Ministry, game: Any, fid: int, rng: np.random
                 repair_amt = min(budget * 0.1 * eff, ship.max_hp * 0.15)
                 ship.hp = min(ship.max_hp, ship.hp + repair_amt)
                 ministry.active_tasks.append(MinistryTask(
-                    _gen_task_id(), f"Repairing {ship.stats.ship_class.name} (hull integrity +{repair_amt:.0f})",
+                    _gen_task_id(), f"Repairing {ship.ship_class.name} (hull integrity +{repair_amt:.0f})",
                     cost=repair_amt * 0.5, turns_remaining=1, turns_total=1,
                 ))
             if not damaged and budget > 5.0:
