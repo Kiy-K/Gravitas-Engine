@@ -83,6 +83,9 @@ from extensions.governance.budget_system import (
 from extensions.military.land_bridge import (
     LandWorld, initialize_land, step_land, land_summary,
 )
+from extensions.ministries.ministries import (
+    MinistryWorld, initialize_ministries, step_ministries, ministry_reports,
+)
 from gravitas_engine.systems.government import (
     GovernmentType, GovernmentModifiers, get_government_modifiers, government_summary,
 )
@@ -115,6 +118,7 @@ class GameState:
     governance: Optional[Any] = None           # GovernanceWorld — budget + corruption
     spirits: Optional[Any] = None              # SpiritWorld — national spirits per faction
     government_types: Dict[int, str] = field(default_factory=dict)  # faction_id → GovernmentType name
+    ministries: Optional[Any] = None           # MinistryWorld — autonomous government divisions
 
     # Cluster data (simplified ground state)
     cluster_data: Any = None  # (N, 6) array [σ, h, r, m, τ, p]
@@ -492,6 +496,7 @@ def create_game(seed: int = 42, max_turns: int = 100) -> GameState:
         governance=initialize_governance([0, 1]),
         spirits=initialize_spirits([0, 1]),
         government_types={0: "TOTALITARIAN", 1: "COMMUNIST"},
+        ministries=initialize_ministries([0, 1]),
         cluster_data=cluster_data,
         cluster_owners=cluster_owners,
         terrain_types=terrain_types,
@@ -553,7 +558,12 @@ def step_game(game: GameState, rng: np.random.Generator, dt: float = 1.0) -> Dic
         game.governance, gov_fb = step_governance(game.governance, faction_gdps, rng, dt)
         feedback["governance"] = gov_fb
 
-    # 1f. National Spirits (tick timed spirits)
+    # 1f. Ministries (autonomous government divisions)
+    if game.ministries is not None:
+        game.ministries, ministry_fb = step_ministries(game.ministries, game, rng, dt)
+        feedback["ministries"] = ministry_fb
+
+    # 1g. National Spirits (tick timed spirits)
     if game.spirits is not None:
         expired = step_spirits(game.spirits)
         if expired:
@@ -860,6 +870,12 @@ def summarize_turn(game: GameState, faction_id: int) -> str:
     if game.governance is not None:
         lines.append("")
         lines.append("BUDGET: " + governance_summary(game.governance, faction_id))
+
+    # ── Ministry Reports (autonomous divisions) ────────────────────────── #
+    if game.ministries is not None and faction_id in game.ministries.factions:
+        lines.append("")
+        lines.append("MINISTRY REPORTS:")
+        lines.append(ministry_reports(game.ministries, faction_id))
 
     # ── Research (tech tree — 10 branches × 5 tiers) ───────────────────── #
     if game.research is not None:
