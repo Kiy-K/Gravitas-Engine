@@ -241,7 +241,7 @@ def apply_weather_effects(
             game.cluster_data[i, 1] = min(1.0, game.cluster_data[i, 1] + 0.002)
 
     # ── Economy: weather affects production ────────────────────────────── #
-    for ce in game.war_economy.cluster_economies:
+    for ce in (game.economy.clusters if game.economy else []):
         cid = ce.cluster_id
         if cid < len(weather.cluster_weather):
             cw = weather.cluster_weather[cid]

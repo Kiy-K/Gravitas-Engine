@@ -385,14 +385,13 @@ def _generate_auto_tasks(ministry: Ministry, game: Any, fid: int, rng: np.random
 
     elif ministry.ministry_type == MinistryType.PLENTY:
         # ── Miniplenty: auto-distribute food to starving sectors ── #
-        if game.war_economy is not None:
-            from extensions.war_economy.war_economy_state import Resource
+        if game.economy is not None:
             starving = []
             surplus = []
-            for ce in game.war_economy.cluster_economies:
+            for ce in game.economy.clusters:
                 if game.cluster_owners.get(ce.cluster_id) != fid:
                     continue
-                food_ratio = ce.stockpile_ratio(Resource.PROCESSED_FOOD)
+                food_ratio = ce.stockpile_ratio("PROCESSED_FOOD")
                 if food_ratio < 0.15:
                     starving.append(ce)
                 elif food_ratio > 0.5:
@@ -401,7 +400,7 @@ def _generate_auto_tasks(ministry: Ministry, game: Any, fid: int, rng: np.random
             # Auto-redistribute from surplus to starving
             if starving and surplus and budget > 2.0:
                 for s_ce in starving[:2]:
-                    s_ce.resource_stockpile[Resource.PROCESSED_FOOD.value] += 5.0 * eff
+                    s_ce.food_stockpile += 5.0 * eff
                     ministry.completed_tasks.append(
                         f"Emergency rations to {game.cluster_names[s_ce.cluster_id]}")
 
