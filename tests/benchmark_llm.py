@@ -70,7 +70,7 @@ from gravitas.llm_game import (
 
 # Known Nebius AI Studio model prefixes
 _NEBIUS_PREFIXES = ("minimax/", "MiniMaxAI/", "zai-org/", "deepseek-ai/", "meta-llama/",
-                    "Qwen/", "moonshotai/", "gpt-oss", "BAAI/")
+                    "Qwen/", "moonshotai/", "openai/", "BAAI/")
 
 
 class LLMClient:
@@ -672,14 +672,14 @@ def main():
     # Apply faction model defaults
     if args.oceania_model is None:
         if os.environ.get("NEBIUS_API_KEY"):
-            args.oceania_model = "MiniMaxAI/MiniMax-M2.1"  # Nebius: MiniMax M2.1
+            args.oceania_model = "openai/gpt-oss-120b"  # Nebius: GPT OSS 120B
         elif os.environ.get("ANTHROPIC_API_KEY"):
             args.oceania_model = "claude-haiku-4-5-20251001"
         else:
             args.oceania_model = args.model
     if args.eurasia_model is None:
         if os.environ.get("NEBIUS_API_KEY"):
-            args.eurasia_model = "zai-org/GLM-5"  # Nebius: GLM 4.7
+            args.eurasia_model = "deepseek-ai/DeepSeek-V3.2"  # Nebius: DeepSeek V3.2
         elif os.environ.get("MISTRAL_API_KEY"):
             args.eurasia_model = "mistral-medium-latest"
         else:

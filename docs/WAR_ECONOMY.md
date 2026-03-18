@@ -9,9 +9,7 @@
 > The **Population System** (`extensions/pop/pop_v2.py`) uses real 1958 census numbers with 1984 social classes.
 > The **Research System** (`extensions/research/research_system.py`) provides a 10×5 HOI4-style tech tree with 50 technologies.
 
-## Legacy Architecture (still runs alongside new systems)
-
-## Architecture
+## Architecture (Legacy — runs alongside new systems)
 
 ```
 extensions/war_economy/

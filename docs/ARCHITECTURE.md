@@ -151,7 +151,7 @@ See [Plugin System Guide](PLUGIN_SYSTEM.md) for details.
 
 ### `scenarios/` — Scenario YAML Files
 
-Scenario definitions including sector configs, initial states, alliances, shock events, and training parameters. Currently: `stalingrad.yaml` (9-sector Battle of Stalingrad).
+Scenario definitions including sector configs, initial states, alliances, shock events, and training parameters. Available scenarios: `moscow.yaml` (9-sector Battle of Moscow), `stalingrad.yaml` (9-sector Battle of Stalingrad), `airstrip_one.yaml` (35-sector 1984 strategic simulation).
 
 ## Data Flow
 

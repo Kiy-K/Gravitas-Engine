@@ -336,6 +336,39 @@ A fourth LLM provides narrative dispatches each turn in the style of **Edward R.
 
 ---
 
+## 12. Manpower System (`extensions/war_economy/manpower.py`)
+
+### Conscription Laws (15 levels)
+
+| Level | Name | Draft Rate | GDP Penalty |
+|-------|------|-----------|-------------|
+| 0 | VOLUNTEER_ONLY | 2% working age | None |
+| 1 | LIMITED_DRAFT | 5% | −2% GDP |
+| 2 | GENERAL_MOBILISATION | 12% | −5% GDP |
+| 3 | TOTAL_MOBILISATION | 25% | −10% GDP |
+| 4 | SCRAPING_THE_BARREL | 40% | −20% GDP |
+
+Draft pulls from **unemployed proles first** → **unemployed outer party** → **employed factory workers** (with GDP hit). Inner Party is exempt.
+
+### Training Pipeline
+
+Conscripts do not become soldiers instantly. They enter a multi-week training pipeline:
+
+| Training Type | Duration | Output |
+|---------------|----------|--------|
+| Basic | 3 weeks | Infantry |
+| Specialist | 6 weeks | Engineers, Snipers, Medics |
+| Armor crew | 8 weeks | Tank crews |
+| Officer | 10 weeks | Leaders (morale bonus) |
+
+Training capacity is limited by INFRASTRUCTURE budget and available trainers. Underfunded labour ministry (via Ministries system) slows throughput.
+
+### Reserves
+
+Discharged veterans enter a **reserve pool**. They can be recalled to active duty faster than raw conscripts (1 week vs. training pipeline). Reserve size depends on war duration and previous mobilisation levels.
+
+---
+
 ## 13. Land Combat System (`extensions/military/land_bridge.py`)
 
 ### CoW Unit Integration

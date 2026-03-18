@@ -31,7 +31,7 @@ The engine supports both **single-agent governance** (PPO stabilization) and **m
 
 ```text
 GravitasEngine/
-├── gravitas/                    # High-level orchestration (NEW)
+├── gravitas/                    # High-level orchestration
 │   ├── __init__.py              # GravitasEngine + Engine alias
 │   ├── engine.py                # Core engine with plugin loader
 │   ├── plugins/                 # Plugin system
@@ -39,7 +39,7 @@ GravitasEngine/
 │   │   ├── soviet_reinforcements.py  # Volga barge crossing mechanic
 │   │   └── axis_airlift.py      # Luftwaffe airlift mechanic
 │   ├── scenarios/               # Scenario YAML files
-│   │   ├── moscow.yaml          # 9-sector Battle of Moscow (NEW)
+│   │   ├── moscow.yaml          # 9-sector Battle of Moscow
 │   │   ├── stalingrad.yaml      # 9-sector Battle of Stalingrad
 │   │   └── airstrip_one.yaml    # 35-sector 1984 scenario
 │   ├── llm_game.py              # Air Strip One LLM game engine
@@ -50,25 +50,28 @@ GravitasEngine/
 │   ├── systems/                 # ODE dynamics, shocks, media, economy
 │   └── analysis/                # Metrics, logging
 ├── extensions/                  # Military wrapper, political interface
-│   ├── military/                # CoW-native military system (NEW)
+│   ├── military/                # CoW-native military system
 │   │   ├── cow_combat.py        # 34 unit types, traits, combat resolution
-│   │   ├── land_bridge.py      # Per-sector land garrisons
+│   │   ├── land_bridge.py       # Per-sector land garrisons
 │   │   ├── military_dynamics.py # Combat, production, research, morale
 │   │   ├── military_state.py    # State dataclasses
-│   │   ├── military_wrapper.py   # Gymnasium environment
+│   │   ├── military_wrapper.py  # Gymnasium environment
 │   │   ├── physics.py           # Physics engine (terrain, weather, supply)
 │   │   ├── physics_bridge.py    # Integration layer
 │   │   └── unit_types.py        # Legacy unit type mappings
-│   ├── economy_v2/              # New economy system (GDP, factories)
+│   ├── economy_v2/              # Economy system (GDP, factories)
 │   ├── pop/                     # Population dynamics
 │   ├── research/                # 10×5 tech tree system
 │   ├── governance/              # Budget, corruption, bureaucracy
+│   ├── ministries/              # Autonomous ministry system
 │   ├── resistance/              # BLF resistance system
 │   ├── naval/                   # Naval warfare, 6 sea zones
 │   ├── air_force/               # Air operations, 10 aircraft types
 │   ├── intelligence/            # Espionage, fog of war
-│   ├── war_economy/             # Legacy resource model
-│   ├── manpower/                # Conscription system
+│   ├── war_economy/             # Legacy resource model + manpower
+│   ├── exhaustion/              # SB3 exhaustion monitor callback
+│   ├── fog_of_war/              # Observation noise wrapper
+│   ├── topology/                # Network graph visualization
 │   └── audits/                  # System validation
 ├── gui/                         # Real-time strategic map GUI
 │   ├── main.py                  # Pygame-based map viewer
@@ -80,8 +83,10 @@ GravitasEngine/
 │   └── moscow.yaml              # Moscow scenario with physics config
 ├── cli.py                       # CLI entry point
 ├── tests/                       # Training, evaluation, replay scripts
-│   ├── benchmark_llm.py        # LLM benchmark for Air Strip One
-│   └── train_moscow_selfplay.py # Moscow self-play training (NEW)
+│   ├── benchmark_llm.py         # LLM benchmark for Air Strip One
+│   ├── train_moscow_selfplay.py # Moscow self-play training
+│   ├── train_stalingrad_selfplay.py  # Stalingrad self-play training
+│   └── train_rppo.py            # RecurrentPPO single-agent training
 └── docs/                        # Documentation
 ```
 
@@ -90,7 +95,8 @@ GravitasEngine/
 ```bash
 git clone https://github.com/Kiy-K/Gravitas-Engine.git
 cd Gravitas-Engine
-pip install -r requirements.txt
+pip install -e ".[dev]"        # Install with dev dependencies
+# pip install -e ".[all]"      # Install with all optional dependencies
 ```
 
 ## Quick Start
@@ -156,7 +162,7 @@ python tests/benchmark_llm.py \
 ### Single-Agent Training
 
 ```bash
-python train_ppo.py
+python tests/train_rppo.py
 ```
 
 ### Multi-Agent Self-Play Training
@@ -289,14 +295,17 @@ The flagship scenario simulates the decisive Eastern Front battle (Oct 1941 – 
 - [Military System Guide](docs/MILITARY_SYSTEM.md) — CoW-native combat, unit types, and traits
 - [Physics Integration](docs/PHYSICS_INTEGRATION.md) — Terrain, weather, and supply modeling
 - [Plugin System Guide](docs/PLUGIN_SYSTEM.md) — Writing and configuring plugins
-- [Stalingrad Scenario](docs/STALINGRAD_SCENARIO.md) — Legacy scenario documentation
+- [Ministries System](docs/MINISTRIES.md) — Autonomous government ministries
+- [Training Guide](docs/TRAINING.md) — PPO/RecurrentPPO training and self-play
+- [RL Utilities](docs/RL_UTILITIES.md) — FogOfWarWrapper, ExhaustionMonitor, TopologyVisualizer
+- [War Economy (Legacy)](docs/WAR_ECONOMY.md) — Leontief resource model
 
 ## Population + Military Modeling
 
 The `PopWrapper` enables multi-class demographics, ethnic tension, and the Soldier archetype with morale/conscription dynamics:
 
 ```python
-from gravitas_engine.extensions.pop.pop_wrapper import PopWrapper
+from extensions.pop.pop_wrapper import PopWrapper
 from gravitas_engine.agents.gravitas_env import GravitasEnv
 
 env = GravitasEnv()
@@ -304,7 +313,7 @@ pop_env = PopWrapper(env)
 obs, info = pop_env.reset()
 ```
 
-See `docs/POPULATION_SYSTEM.md` for full details.
+See `docs/AIRSTRIP_ONE_SYSTEMS.md` (section 3) for full details.
 
 ## License
 

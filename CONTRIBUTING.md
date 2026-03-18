@@ -1,6 +1,6 @@
-# Contributing to RegimeEngine
+# Contributing to GRAVITAS Engine
 
-We welcome contributions to RegimeEngine. To ensure a smooth process, please follow these guidelines.
+We welcome contributions to GRAVITAS Engine. To ensure a smooth process, please follow these guidelines.
 
 ## Code of Conduct
 
@@ -27,4 +27,4 @@ Use the GitHub issue tracker to report bugs or suggest enhancements. Provide a c
 
 ## Licensing
 
-By contributing to RegimeEngine, you agree that your contributions will be licensed under the Apache License 2.0.
+By contributing to GRAVITAS Engine, you agree that your contributions will be licensed under the Apache License 2.0.
