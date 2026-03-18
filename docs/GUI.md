@@ -148,7 +148,7 @@ gui/
 
 ## Dependencies
 
-- **Python 3.14+**
+- **Python 3.9+**
 - **Pygame 2.5+**
 - **NumPy** (from main project)
 

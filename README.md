@@ -15,17 +15,17 @@ The engine supports both **single-agent governance** (PPO stabilization) and **m
 - **CoW-Native Military System**: Full Call of War-style combat with 34 unit types, terrain bonuses, morale dynamics, physics integration, and per-sector land garrisons.
 - **Physics-Driven Simulation**: Realistic terrain, weather, supply logistics, and line-of-sight modeling integrated with combat mechanics.
 - **Advanced Unit Traits**: Elite units, terrain specialization, weather adaptation, engineering capabilities, and combat specials (suppression, breakthrough, ambush).
-- **Multi-Agent Warfare**: Adversarial Axis vs. Soviet self-play with per-side observations, actions, and rewards (Battle of Moscow scenario).
+- **Multi-Agent Warfare**: Adversarial Axis vs. Soviet self-play with per-side observations, actions, and rewards (Battle of Stalingrad scenario).
 - **Air Strip One 1984**: Three-faction strategic simulation across 35 sectors (British Isles, France, Benelux, Netherlands) with LLM-driven AI players.
 - **Real-Time GUI**: Interactive strategic map viewer with fleet positions, land garrisons, BLF resistance, and war correspondent dispatches.
 - **Plugin Architecture**: Modular, hot-pluggable simulation extensions with standardized `on_step(world, turn)` interface.
-- **Historical Scenarios**: YAML-defined scenarios (Moscow 1941 with 9 sectors, detailed terrain, winter attrition, partisan warfare).
+- **Historical Scenarios**: YAML-defined scenarios (Stalingrad 1942-43 and Air Strip One 1984).
 - **Hierarchical Modeling**: Districts nested within provinces, with custom adjacency and diffusion rates.
 - **Reinforcement Learning**: Trained PPO/RecurrentPPO agents for regime stabilization and adversarial warfare.
 - **Economic Subsystem**: Per-cluster GDP, unemployment, debt, and industrial capacity with bidirectional military feedback.
 - **Population & Military**: Multi-class demographics, ethnic tension, conscription/desertion dynamics, and 34 military unit types.
 - **Spatial Dynamics**: Domino effects, cascade failures, and alliance diplomacy across geographical units.
-- **CLI Interface**: `python cli.py run moscow --episodes 30` for quick scenario execution.
+- **CLI Interface**: `python cli.py run stalingrad --episodes 30` for quick scenario execution.
 
 ## Architecture
 
@@ -36,11 +36,12 @@ GravitasEngine/
 │   ├── engine.py                # Core engine with plugin loader
 │   ├── plugins/                 # Plugin system
 │   │   ├── __init__.py          # GravitasPlugin base class + discovery
+│   │   ├── nonlinear_combat.py  # Nonlinear combat dynamics
+│   │   ├── logistics_network.py # Supply network dynamics
+│   │   ├── partisan_warfare.py  # Autonomous partisan mechanics
 │   │   ├── soviet_reinforcements.py  # Volga barge crossing mechanic
 │   │   └── axis_airlift.py      # Luftwaffe airlift mechanic
 │   ├── scenarios/               # Scenario YAML files
-│   │   ├── moscow.yaml          # 9-sector Battle of Moscow
-│   │   ├── stalingrad.yaml      # 9-sector Battle of Stalingrad
 │   │   └── airstrip_one.yaml    # 35-sector 1984 scenario
 │   ├── llm_game.py              # Air Strip One LLM game engine
 │   └── weather_bridge.py        # Weather system integration
@@ -80,11 +81,10 @@ GravitasEngine/
 │   └── __init__.py              # GUI package
 ├── configs/                     # Unified YAML configuration
 │   ├── custom.yaml              # Plugin + scenario config
-│   └── moscow.yaml              # Moscow scenario with physics config
+│   └── (use custom.yaml)        # Unified scenario + plugin config
 ├── cli.py                       # CLI entry point
 ├── tests/                       # Training, evaluation, replay scripts
 │   ├── benchmark_llm.py         # LLM benchmark for Air Strip One
-│   ├── train_moscow_selfplay.py # Moscow self-play training
 │   ├── train_stalingrad_selfplay.py  # Stalingrad self-play training
 │   └── train_rppo.py            # RecurrentPPO single-agent training
 └── docs/                        # Documentation
@@ -104,25 +104,25 @@ pip install -e ".[dev]"        # Install with dev dependencies
 ### CLI (Recommended)
 
 ```bash
-# Run Moscow with physics-enabled military system
-python cli.py run moscow --episodes 5
+# Run Stalingrad scenario
+python cli.py run stalingrad --episodes 5
 
 # Run from unified config
-python cli.py run --config configs/moscow.yaml --episodes 30
+python cli.py run --config configs/custom.yaml --episodes 30
 
 # List available scenarios and plugins
 python cli.py list scenarios
 python cli.py list plugins
 
 # Run with trained agents
-python cli.py run moscow --episodes 30 \
-    --axis-model logs/moscow_selfplay/axis_final.zip \
-    --soviet-model logs/moscow_selfplay/soviet_final.zip
+python cli.py run stalingrad --episodes 30 \
+    --axis-model logs/stalingrad_selfplay/axis_final.zip \
+    --soviet-model logs/stalingrad_selfplay/soviet_final.zip
 
 # Detailed battle replay with sector-by-sector commentary
 python cli.py replay \
-    --axis-model logs/moscow_selfplay/axis_final.zip \
-    --soviet-model logs/moscow_selfplay/soviet_final.zip
+    --axis-model logs/stalingrad_selfplay/axis_final.zip \
+    --soviet-model logs/stalingrad_selfplay/soviet_final.zip
 ```
 
 ### Python API
@@ -136,7 +136,7 @@ results = engine.run(episodes=10)
 
 # Manual setup
 engine = GravitasEngine(scenario="stalingrad", seed=42)
-engine.load_plugins(["soviet_reinforcements", "axis_airlift"])
+engine.load_plugins(["nonlinear_combat", "logistics_network"])
 results = engine.run(episodes=30)
 
 # Access environment directly
@@ -168,17 +168,17 @@ python tests/train_rppo.py
 ### Multi-Agent Self-Play Training
 
 ```bash
-python tests/train_moscow_selfplay.py \
+python tests/train_stalingrad_selfplay.py \
     --total-rounds 6 --steps-per-round 25000 --n-envs 4 \
-    --log-dir logs/moscow_selfplay
+    --log-dir logs/stalingrad_selfplay
 ```
 
 ### Battle Evaluation
 
 ```bash
-python tests/eval_moscow_battle.py \
-    --axis-model logs/moscow_selfplay/axis_final.zip \
-    --soviet-model logs/moscow_selfplay/soviet_final.zip \
+python tests/eval_stalingrad_battle.py \
+    --axis-model logs/stalingrad_selfplay/axis_final.zip \
+    --soviet-model logs/stalingrad_selfplay/soviet_final.zip \
     --n-episodes 30
 ```
 
@@ -202,10 +202,13 @@ class Plugin(GravitasPlugin):
 
 ### Built-in Plugins
 
-| Plugin | Description | Historical Basis |
-|--------|-------------|-----------------|
-| `soviet_reinforcements` | Boosts Soviet reserves when Volga Crossing is held | Nightly barge crossings across the Volga |
-| `axis_airlift` | Diminishing supply drops to encircled Axis sectors | Göring's failed Luftwaffe airlift promise |
+| Plugin | Description |
+|--------|-------------|
+| `nonlinear_combat` | Nonlinear combat dynamics (Lanchester, breakthrough, fatigue, terrain multipliers) |
+| `logistics_network` | Graph-based logistics with saturating flow, consumption pressure, disruptions |
+| `partisan_warfare` | Autonomous partisan actions (recruitment, sabotage, ambush, movement) |
+| `soviet_reinforcements` | Volga-crossing reinforcement mechanic |
+| `axis_airlift` | Diminishing Axis air resupply mechanic |
 
 ### Plugin Lifecycle
 
@@ -222,42 +225,34 @@ Plugins are configured via `configs/custom.yaml`:
 
 ```yaml
 plugins:
-  - soviet_reinforcements
-  - axis_airlift
+  - nonlinear_combat
+  - logistics_network
 
 plugin_configs:
-  soviet_reinforcements:
-    trigger_turn_interval: 50
-    military_boost: 0.10
-    sigma_threshold: 0.5
-  axis_airlift:
-    trigger_turn_interval: 40
-    base_resource_boost: 0.04
-    decay_rate: 0.005
+  nonlinear_combat:
+    terrain_modifier: 1.2
+    fortification_bonus: 0.35
+
+  logistics_network:
+    disruption_threshold: 0.4
+    repair_rate: 0.02
 ```
 
-## Battle of Moscow Scenario
+## Battle of Stalingrad Scenario
 
-The flagship scenario simulates the decisive Eastern Front battle (Oct 1941 – Jan 1942) with **9 operational sectors**, **physics-driven terrain/weather**, and **34 unit types**:
+The flagship training scenario simulates the decisive Eastern Front battle (Aug 23, 1942 – Feb 2, 1943) with **9 operational sectors**:
 
 | ID | Sector | Controller | Terrain | Role |
 |----|--------|-----------|---------|------|
-| 0 | Moscow City Center | Soviet | urban | Soviet capital — primary strategic objective |
-| 1 | Yaroslavl Rail Hub | Soviet | forest | Logistics hub, supply distribution |
-| 2 | Tula Defense Line | Soviet | forest | Fortified defensive line, arms production |
-| 3 | Soviet Strategic Reserve | Soviet | forest | Siberian reinforcements, winter troops |
-| 4 | Bryansk Forest | Contested | forest | Partisan territory, contested zone |
-| 5 | Vyazma Rail Hub | Axis | open | Primary Axis logistics hub |
-| 6 | Smolensk Forward Base | Axis | urban | Army Group Center HQ |
-| 7 | Kalinin Northern Front | Axis | forest | 3rd Panzer Group advance |
-| 8 | Klin-Solnechnogorsk | Axis | open | Closest approach to Moscow |
-
-### Physics Integration
-
-- **Terrain Effects**: Urban (+35% defense for Guards), Forest (+15% defense), Mountains, Marsh
-- **Weather Dynamics**: Temperature curve, snow depth, visibility, equipment reliability
-- **Supply Logistics**: Rail/road capacity, fuel/ammo consumption, winter attrition
-- **Line of Sight**: Recon units, terrain masking, detection ranges
+| 0 | Stalingrad City Center | Axis | urban | Contested city ruins, block-by-block combat |
+| 1 | Tractor Factory District | Axis | urban | Industrial fighting zone |
+| 2 | Mamayev Kurgan | Contested | urban | Strategic hill dominating the city |
+| 3 | Volga Crossing | Soviet | riverfront | Soviet lifeline across the Volga |
+| 4 | Northern Don River Line | Axis | open | Axis defensive flank |
+| 5 | Axis Supply Corridor | Axis | open | Overextended logistics corridor |
+| 6 | Soviet Strategic Reserve | Soviet | open | Build-up for Operation Uranus |
+| 7 | Romanian/Italian Sector | Axis | open | Weak Axis southern flank |
+| 8 | Wintergewitter Corridor | Axis | open | Hoth's relief push route |
 
 ### Unit Types & Traits
 
@@ -269,14 +264,12 @@ The flagship scenario simulates the decisive Eastern Front battle (Oct 1941 – 
 
 ### Historical Shock Events
 
-- **Rail Sabotage**: Partisans disrupt Axis supply lines
-- **Fuel Shortage**: Axis vehicles freeze in extreme cold
-- **Winter Blizzard**: -40°C temperatures, equipment failures
-- **Siberian Divisions**: Fresh winter-equipped Soviet reinforcements
-- **Factory Evacuation**: Soviet production relocation
-- **German Panic Retreat**: Unauthorized Axis withdrawals
-- **Soviet Counteroffensive**: Zhukov's December 1941 push
-- **Partisan Uprising**: Coordinated Bryansk Forest operations
+- **Winter Blizzard**: Severe cold shock that strains both sides
+- **Luftwaffe Airlift**: Partial, diminishing Axis resupply attempt
+- **Operation Uranus**: Soviet double envelopment event
+- **Axis Kessel**: Encirclement and logistics collapse
+- **Operation Winter Storm**: German relief thrust from the south
+- **Operation Little Saturn**: Soviet move that cuts relief momentum
 
 ### Training Results (Self-Play)
 

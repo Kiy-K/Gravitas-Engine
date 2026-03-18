@@ -118,7 +118,7 @@ Optional wrappers that add military and population modeling on top of the core s
 
 - **`land_bridge.py`** — Per-sector land garrisons using CoW combat system (30+ unit types). Resolves combat in contested sectors each turn. Spawns beachhead units for successful invasions.
 
-### Manpower Extension (`extensions/manpower/`)
+### Manpower Extension (`extensions/war_economy/`)
 
 - **`manpower.py`** — Conscription system with 15 laws, training pipeline, and recruitment from population pools.
 
@@ -144,6 +144,9 @@ The central class that:
 ### `plugins/` — Plugin System
 
 - **`__init__.py`** — `GravitasPlugin` ABC, discovery, and loading utilities.
+- **`nonlinear_combat.py`** — Nonlinear combat dynamics plugin.
+- **`logistics_network.py`** — Supply and logistics network plugin.
+- **`partisan_warfare.py`** — Autonomous partisan warfare plugin.
 - **`soviet_reinforcements.py`** — Volga barge crossing mechanic.
 - **`axis_airlift.py`** — Luftwaffe airlift mechanic.
 
@@ -151,7 +154,7 @@ See [Plugin System Guide](PLUGIN_SYSTEM.md) for details.
 
 ### `scenarios/` — Scenario YAML Files
 
-Scenario definitions including sector configs, initial states, alliances, shock events, and training parameters. Available scenarios: `moscow.yaml` (9-sector Battle of Moscow), `stalingrad.yaml` (9-sector Battle of Stalingrad), `airstrip_one.yaml` (35-sector 1984 strategic simulation).
+Scenario definitions including sector configs, initial states, alliances, shock events, and training parameters. Available scenarios: `airstrip_one.yaml` (35-sector 1984 strategic simulation in `gravitas/scenarios/`) and `stalingrad.yaml` (9-sector Battle of Stalingrad in `training/regimes/`).
 
 ## Data Flow
 
@@ -162,8 +165,7 @@ Scenario definitions including sector configs, initial states, alliances, shock 
    │
 2. env.reset(seed)
    │  → GravitasWorld initialized with cluster states, alliances
-   │  → Physics states initialized (terrain, weather, supply)
-   │  → Military units created from scenario config
+   │  → Optional scenario metadata cached for plugins
    │  → Plugin.on_reset(world) called for each plugin
    │
 3. Loop: env.step(actions)
@@ -175,12 +177,9 @@ Scenario definitions including sector configs, initial states, alliances, shock 
    │  f. Alliance decay
    │  g. Population step (if enabled)
    │  h. Economy step (if enabled)
-   │  i. Physics step (terrain, weather, supply attrition)
-   │  j. Military step (CoW combat, production, movement)
-   │  k. Physics bridge integration (combat modifiers, LOS)
-   │  l. Advance step counter
-   │  m. Compute per-side rewards
-   │  n. Build per-side observations (including physics)
+   │  i. Advance step counter
+   │  j. Compute per-side rewards
+   │  k. Build per-side observations
    │  │
    │  → Plugin.on_step(world, turn) called for each plugin
    │
@@ -199,16 +198,14 @@ Per-side observations include:
 - Global state (exhaustion, media bias, etc.)
 - Alliance information
 - Previous action encoding
-- Economy indicators (if enabled)
-- Military units (34 types, HP, XP, traits)
-- Physics observations (terrain, weather, supply levels)
-- Line of sight and detection data
+- Economy and population indicators (if enabled)
+- Plugin-modified signals (if active plugins add effects)
 
 ## Configuration System
 
-### Scenario YAML (`gravitas/scenarios/moscow.yaml`, `stalingrad.yaml`)
+### Scenario YAML (`gravitas/scenarios/airstrip_one.yaml`, `training/regimes/stalingrad.yaml`)
 
-Defines the full scenario: GravitasParams overrides, sector definitions with initial states, alliance matrix, custom shock events, physics configuration, and training parameters. Moscow scenario includes physics-driven terrain/weather and 34 unit types.
+Defines the full scenario: GravitasParams overrides, sector definitions with initial states, alliance matrix, custom shock events, and training parameters.
 
 ### Unified Config (`configs/custom.yaml`)
 

@@ -69,6 +69,9 @@ Then register it in `gravitas/plugins/__init__.py`:
 
 ```python
 _BUILTIN_PLUGINS: Dict[str, str] = {
+    "nonlinear_combat": "gravitas.plugins.nonlinear_combat",
+    "logistics_network": "gravitas.plugins.logistics_network",
+    "partisan_warfare": "gravitas.plugins.partisan_warfare",
     "soviet_reinforcements": "gravitas.plugins.soviet_reinforcements",
     "axis_airlift": "gravitas.plugins.axis_airlift",
     "my_mechanic": "gravitas.plugins.my_mechanic",  # Add this
@@ -88,7 +91,7 @@ Plugins have four lifecycle hooks:
 
 ### Execution Order
 
-1. Environment `step()` runs (actions applied, physics, shocks, economy).
+1. Environment `step()` runs (actions, ODE integration, shocks, media/alliance/pop/economy updates).
 2. Each plugin's `on_step()` is called **in order** (as listed in config).
 3. Plugins receive the world **after** all engine updates.
 4. Each plugin can modify the world; the next plugin sees the modified state.
@@ -102,18 +105,16 @@ This means plugin order matters. Put prerequisite plugins first in the config.
 ```yaml
 scenario: stalingrad
 plugins:
-  - soviet_reinforcements
-  - axis_airlift
+  - nonlinear_combat
+  - logistics_network
 
 plugin_configs:
-  soviet_reinforcements:
-    trigger_turn_interval: 50
-    military_boost: 0.10
-    sigma_threshold: 0.5
-    hazard_threshold: 0.7
-  axis_airlift:
-    trigger_turn_interval: 40
-    base_resource_boost: 0.04
+  nonlinear_combat:
+    terrain_modifier: 1.2
+    fortification_bonus: 0.35
+  logistics_network:
+    disruption_threshold: 0.4
+    repair_rate: 0.02
 ```
 
 ### Via Python API
@@ -123,11 +124,11 @@ from gravitas import GravitasEngine
 
 engine = GravitasEngine(scenario="stalingrad")
 engine.load_plugins(
-    ["soviet_reinforcements"],
+    ["nonlinear_combat"],
     plugin_configs={
-        "soviet_reinforcements": {
-            "trigger_turn_interval": 25,  # Override default
-            "military_boost": 0.15,
+        "nonlinear_combat": {
+            "trigger_turn_interval": 1,
+            "breakthrough_threshold": 0.58,
         }
     }
 )
@@ -136,10 +137,22 @@ engine.load_plugins(
 ### Via CLI
 
 ```bash
-python cli.py run stalingrad --plugins soviet_reinforcements axis_airlift
+python cli.py run stalingrad --plugins nonlinear_combat logistics_network
 ```
 
 ## Built-in Plugins
+
+### `nonlinear_combat`
+
+Applies nonlinear combat dynamics (Lanchester square-law style balance, diminishing returns, breakthrough sigmoids, combat fatigue, terrain multipliers).
+
+### `logistics_network`
+
+Adds supply-network dynamics with nonlinear production/consumption, saturating logistics flow, and disruption cascades.
+
+### `partisan_warfare`
+
+Models autonomous partisan behavior (recruitment, sabotage, ambushes, movement, detection) as a stochastic third force.
 
 ### `soviet_reinforcements`
 
@@ -201,7 +214,7 @@ for r in results:
 
 ```python
 for plugin in engine.plugins:
-    if plugin.name == "axis_airlift":
+    if plugin.name == "nonlinear_combat":
         plugin.enabled = False
 ```
 
@@ -209,8 +222,8 @@ for plugin in engine.plugins:
 
 ```python
 for plugin in engine.plugins:
-    if plugin.name == "soviet_reinforcements":
-        print(f"Deliveries: {plugin.reinforcement_count}")
+    if plugin.name == "logistics_network":
+        print(f"Tracked sectors: {len(plugin._sector_production)}")
 ```
 
 ### Custom Plugin Discovery
